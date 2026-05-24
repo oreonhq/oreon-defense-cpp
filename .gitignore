@@ -2,9 +2,10 @@ CMakeCache.txt
 CMakeFiles
 Makefile
 oreon-defense
-oreon-defense_autogen
+*_autogen
 cmake_install.cmake
 .qt
-oreon-defense_qmltyperegistrations.cpp
+*_qmltyperegistrations.cpp
 qmltypes
 .rcc
+*.so

@@ -22,12 +22,18 @@ qt_add_executable(oreon-defense
     MANUAL_FINALIZATION
     ${PROJECT_SOURCES}
 )
+add_subdirectory(MainUi/Common)
 qt_add_qml_module(oreon-defense
 	URI MainUi
 	VERSION 1.0
 	QML_FILES
-		ui/Main.qml
+		MainUi/Main.qml
+		MainUi/SettingsPage.qml
+		MainUi/pages/firewall.qml
+		MainUi/pages/antivirus.qml
+	DEPENDENCIES TARGET common
 )
+
 target_compile_definitions(oreon-defense
   PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
 target_link_libraries(oreon-defense

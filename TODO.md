@@ -1,0 +1,15 @@
+- [ ] Implement a basic UI layout for the settings
+- [ ] Create a persistent configuration file
+- [ ] Create a frontend for nftables
+	- [ ] Require root privileges to access this menu
+	- [ ] Allow enabling/disabling nftables
+	- [ ] Allow creating/removing nftables rules
+- [ ] Create a frontend to ClamAV
+	- [ ] Give a manual refresh for the databases
+	- [ ] Run freshclam automatically if it's been a week since the last refresh
+- [ ] Set up a tray icon
+	- [ ] Design a simple, flat logo instead of the current overly complex one.
+	- [ ] Allow setting the tray icon to only appear when necessary.
+- [ ] Set up desktop notifications when necessary
+- [ ] Alter theming to allow switching between light and dark mode.
+- [ ] Possibly add support for other init systems if feasible.

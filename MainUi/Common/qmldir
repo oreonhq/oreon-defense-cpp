@@ -1,0 +1,13 @@
+module MainUi.Common
+linktarget commonplugin
+optional plugin commonplugin
+classname MainUi_CommonPlugin
+typeinfo common.qmltypes
+prefer :/qt/qml/MainUi/Common/
+QButton 254.0 QButton.qml
+QCombo 254.0 QCombo.qml
+QInput 254.0 QInput.qml
+QSlider 254.0 QSlider.qml
+QSwitch 254.0 QSwitch.qml
+QText 254.0 QText.qml
+

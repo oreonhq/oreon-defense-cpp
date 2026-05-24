@@ -1,6 +1,9 @@
 module MainUi
 typeinfo oreon-defense.qmltypes
+depends TARGET
+depends common
 prefer :/MainUi/
-Main 1.0 ui/Main.qml
+Main 1.0 MainUi/Main.qml
+SettingsPage 1.0 MainUi/SettingsPage.qml
 depends QtQuick
 
