@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="/MainUi">/home/red/Projects/Coding/C++/oreon-defense-cpp/MainUi</file>
+
+  </qresource>
+</RCC>

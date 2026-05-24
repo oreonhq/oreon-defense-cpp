@@ -1,0 +1,6 @@
+module MainUi
+typeinfo oreon-defense.qmltypes
+prefer :/MainUi/
+Main 1.0 ui/Main.qml
+depends QtQuick
+
