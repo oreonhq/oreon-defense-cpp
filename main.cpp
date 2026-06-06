@@ -5,11 +5,15 @@
 
 #include "clamav.h"
 
-#include <iostream>
 #include <filesystem>
 #include <future>
+#include <iostream>
+#include <utility>
+
+typedef struct cl_scan_options scanopts;
 
 void run_clamav_daemon();
+std::pair<int, const char*> check_virus(const char *filename, struct cl_engine* clamav, scanopts &options);
 
 int main(int argc, char** argv) {
 	QApplication app(argc, argv);
@@ -46,14 +50,34 @@ void run_clamav_daemon() {
 		std::cout << "Failed to create ClamAV engine!" << std::endl;
 		cl_engine_free(clamav);
 		return;
-	} else {
-		success = cl_load(cl_retdbdir(), clamav, &sigs, CL_DB_STDOPT);
-		if (success != CL_SUCCESS) {
-			std::cout << "Failed to initialize ClamAV DB!" << std::endl;
-			cl_engine_free(clamav);
-			return;
-		} else {
-			std::cout << "Initialized ClamAV DB" << std::endl;
-		}
 	}
+	if ((success = cl_load(cl_retdbdir(), clamav, &sigs, CL_DB_STDOPT)) != CL_SUCCESS) {
+		std::cout << "Failed to initialize ClamAV DB!" << std::endl;
+		cl_engine_free(clamav);
+		return;
+	}
+	std::cout << "Initialized ClamAV DB" << std::endl;
+	cl_engine_compile(clamav);
+
+	scanopts options;
+	memset(&options, CL_SCAN_GENERAL_ALLMATCHES, sizeof(scanopts));
+
+	auto a = check_virus("/tmp/test.txt", clamav, options);
+	if (a.first == 1)
+		std::cout << "Virus detected: " << a.second << std::endl;
+	else if (a.first == 2)
+		std::cerr << "Error: " << a.second << std::endl;
+	else std::cout << "No viruses detected." << std::endl;
+}
+
+std::pair<int, const char*> check_virus(const char *filename, struct cl_engine* clamav, scanopts &options) {
+	cl_error_t success;
+	const char *virname;
+
+	if ((success = cl_scanfile(filename, &virname, NULL, clamav, &options)) == CL_VIRUS)
+		return std::pair(1, virname);
+	else if (success != CL_CLEAN)
+		return std::pair(2, cl_strerror(success));
+	else
+		return std::pair(0, (const char*)NULL);
 }

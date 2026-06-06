@@ -1,12 +1,14 @@
-- [ ] Implement a basic UI layout for the settings
+- [x] Implement a basic UI layout for the settings
 - [ ] Create a persistent configuration file
 - [ ] Create a frontend for nftables
 	- [ ] Require root privileges to access this menu
 	- [ ] Allow enabling/disabling nftables
 	- [ ] Allow creating/removing nftables rules
 - [ ] Create a frontend to ClamAV
+	- [x] Implement basic ClamAV daemon and scannning support
 	- [ ] Give a manual refresh for the databases
 	- [ ] Run freshclam automatically if it's been a week since the last refresh
+	- [ ] Implement a UI for ClamAV scanning
 - [ ] Set up a tray icon
 	- [ ] Design a simple, flat logo instead of the current overly complex one.
 	- [ ] Allow setting the tray icon to only appear when necessary.
