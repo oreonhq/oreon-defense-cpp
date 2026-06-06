@@ -37,7 +37,7 @@ qt_add_qml_module(oreon-defense
 target_compile_definitions(oreon-defense
   PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
 target_link_libraries(oreon-defense
-  PRIVATE Qt6::Core Qt6::Quick Qt6::Widgets Qt6::Qml)
+  PRIVATE Qt6::Core Qt6::Quick Qt6::Widgets Qt6::Qml clamav)
 
 
 qt_import_qml_plugins(oreon-defense)
