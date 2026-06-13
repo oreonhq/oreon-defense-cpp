@@ -12,4 +12,5 @@ qt_add_qml_module(common
         QInput.qml
         QSlider.qml
         QSwitch.qml
-        QText.qml)
+        QText.qml
+        QFilePicker.qml)

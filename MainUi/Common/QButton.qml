@@ -5,10 +5,13 @@ Button {
 	property var content: "Placeholder"
 	leftPadding: 7.5
 	rightPadding: 7.5
+	property var elide: Text.ElideNone
+	property real radius: height / 2
+	property string bgcolor: hovered ? "#4c4c4c" : "#2c2c2c"
 
 	background: Rectangle {
-		radius: height / 2
-		color: parent.hovered ? "#4c4c4c" : "#2c2c2c"
+		radius: parent.radius
+		color: parent.bgcolor
 		anchors.fill: parent
 
 		border {
@@ -20,5 +23,6 @@ Button {
 	contentItem: Text {
 		color: "#ffffff"
 		text: parent.content
+		elide: parent.elide
 	}
 }

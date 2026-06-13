@@ -1,21 +1,52 @@
+import QtCore
 import QtQuick
+import QtQuick.Dialogs
 import MainUi.Common
 import MainUi
 
+import Qt.labs.folderlistmodel
+
 Column {
-	Column {
-		QInput {
-			id: input1
-			label: "File: "
-			pltext: "Type the name of a file..."
-		}
+	id: root
+	Row {
 		QButton {
-			content: "Check File"
-			onClicked: {
-				let result = Antivirus.checkVirus(input1.text);
-				console.warn(`Success: ${result["success"]}`);
-				console.warn(`Value: ${result["value"]}`);
+			content: "Choose a file"
+			onClicked: scannerPick.open()
+		}
+		QText {
+			id: input1
+			text: ""
+		}
+		QFilePicker {
+			id: scannerPick
+			x: root.width / 2 - width / 2
+			y: root.height / 2 - height / 2
+			onValueChanged: {
+				input1.text = value
 			}
 		}
+		// FileDialog {
+		// 	id: scannerPick
+		// 	currentFolder: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+		// 	onAccepted: input1.text = new URL(selectedFile).pathname
+		// }
+	}
+	QButton {
+		content: "Check File"
+		onClicked: {
+			let result = Antivirus.checkVirus(input1.text);
+			console.warn(`Success: ${result["success"]}`);
+			console.warn(`Value: ${result["value"]}`);
+			if (result["success"] == 0)
+				resultText.text = "No virus found!"
+			else if (result["success"] == 1)
+				resultText.text = "Virus detected: " + result["value"]
+			else
+				resultText.text = "Error: " + result["value"]
+		}
+	}
+	QText {
+		id: resultText
+		text: ""
 	}
 }

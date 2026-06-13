@@ -10,4 +10,5 @@ QInput 254.0 QInput.qml
 QSlider 254.0 QSlider.qml
 QSwitch 254.0 QSwitch.qml
 QText 254.0 QText.qml
+QFilePicker 254.0 QFilePicker.qml
 
