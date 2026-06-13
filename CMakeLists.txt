@@ -15,14 +15,22 @@ find_package(Qt6 COMPONENTS Core Quick Widgets Qml REQUIRED)
 
 set(PROJECT_SOURCES
         main.cpp
+        virus-detection.cpp
+        virus-detection.h
         qml.qrc
 )
-
 qt_add_executable(oreon-defense
-    MANUAL_FINALIZATION
-    ${PROJECT_SOURCES}
+MANUAL_FINALIZATION
+${PROJECT_SOURCES}
 )
 add_subdirectory(MainUi/Common)
+# qt_add_qml_module(oreon-defense
+# 	URI antivirus
+# 	VERSION 1.0
+# 	SOURCES
+# 		virus-detection.cpp virus-detection.h
+# )
+
 qt_add_qml_module(oreon-defense
 	URI MainUi
 	VERSION 1.0
@@ -31,6 +39,8 @@ qt_add_qml_module(oreon-defense
 		MainUi/SettingsPage.qml
 		MainUi/pages/firewall.qml
 		MainUi/pages/antivirus.qml
+  SOURCES
+		virus-detection.cpp virus-detection.h
 	DEPENDENCIES TARGET common
 )
 
