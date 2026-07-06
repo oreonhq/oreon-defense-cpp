@@ -3,7 +3,8 @@
 Oreon Defense is a frontend to ClamAV, firewalld, nftables, and a few other security-related things.
 
 ## Dependencies
-- qt6
+- qt6-base
+- qt6-qt5compat
 - clamav-devel
 
 ## License
