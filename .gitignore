@@ -11,3 +11,4 @@ qmltypes
 *.so
 build
 meta_types
+.vscode
