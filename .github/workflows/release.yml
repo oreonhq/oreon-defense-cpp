@@ -1,0 +1,232 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 1.2.3 or v1.2.3)"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark as a pre-release"
+        required: false
+        default: false
+        type: boolean
+      make_latest:
+        description: "Mark as the latest release"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.semver.outputs.tag }}
+      plain: ${{ steps.semver.outputs.plain }}
+    steps:
+      - name: Parse and validate semantic version
+        id: semver
+        run: |
+          set -euo pipefail
+          RAW="${{ github.event.inputs.version }}"
+          # Strip a single leading 'v' if present
+          PLAIN="${RAW#v}"
+
+          # Strict semver: MAJOR.MINOR.PATCH with optional -prerelease and +build
+          SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'
+          if ! printf '%s' "$PLAIN" | grep -Eq "$SEMVER_RE"; then
+            echo "::error::'$RAW' is not a valid semantic version (expected X.Y.Z, optionally with -prerelease/+build)."
+            exit 1
+          fi
+
+          TAG="v${PLAIN}"
+          echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
+          echo "plain=$PLAIN"    >> "$GITHUB_OUTPUT"
+          echo "Will release $TAG"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: fedora:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Install build dependencies
+        run: |
+          set -e
+          dnf install -y --setopt=install_weak_deps=False \
+            qt6-qtbase-devel \
+            cmake \
+            ninja-build \
+            gcc-c++ \
+            git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF
+
+      - name: Build
+        run: cmake --build build --parallel "$(nproc)"
+
+      - name: Stage install tree
+        run: |
+          set -e
+          mkdir -p pkg
+          DESTDIR="$PWD/stage" cmake --install build
+          # Flatten the staged /usr prefix into a top-level tree for packaging
+          if [ -d "stage/usr" ]; then
+            mkdir -p pkg/usr
+            cp -a stage/usr/. pkg/usr/
+          fi
+          # Embed metadata for traceability
+          printf 'version=%s\narch=%s\ncommit=%s\nsource=%s\n' \
+            "${{ needs.validate.outputs.plain }}" \
+            "${{ matrix.arch }}" \
+            "${{ github.sha }}" \
+            "${{ github.repository }}" \
+            > pkg/RELEASE_INFO.txt
+
+      - name: Build binary tarball
+        run: |
+          ARTIFACT="oreon-defense-${{ needs.validate.outputs.plain }}-linux-${{ matrix.arch }}.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' \
+            --owner=0 --group=0 --numeric-owner \
+            -czf "$ARTIFACT" -C pkg .
+          sha256sum "$ARTIFACT" > "$ARTIFACT.sha256"
+          echo "artifact=$ARTIFACT" >> "$GITHUB_ENV"
+          ls -lh "$ARTIFACT" "$ARTIFACT.sha256"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.arch }}
+          path: |
+            oreon-defense-*.tar.gz
+            oreon-defense-*.tar.gz.sha256
+          retention-days: 7
+
+  release:
+    name: Publish release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app_token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: binary-*
+          merge-multiple: false
+
+      - name: Flatten artifacts
+        run: |
+          set -e
+          mkdir -p assets
+          find release-assets -type f \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' \) \
+            -exec cp {} assets/ \;
+          echo "::group::Release assets"
+          ls -lh assets/
+          echo "::endgroup::"
+
+      - name: Verify asset checksums
+        run: |
+          set -e
+          cd assets
+          for f in *.tar.gz.sha256; do
+            sha256sum -c "$f"
+          done
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ steps.app_token.outputs.token }}
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: ${{ needs.validate.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
+          make_latest: ${{ github.event.inputs.make_latest }}
+          files: assets/*
+
+  update-spec:
+    name: Update RPM spec
+    needs: [validate, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: app_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: oreonhq
+          repositories: rpm-specfiles
+
+      - name: Checkout rpm-specfiles
+        uses: actions/checkout@v4
+        with:
+          repository: oreonhq/rpm-specfiles
+          token: ${{ steps.app_token.outputs.token }}
+          path: rpm-specfiles
+
+      - name: Update spec version
+        run: |
+          set -euo pipefail
+          SPEC="rpm-specfiles/oreon-11-rp1/oreon-defense/oreon-defense.spec"
+          VERSION="${{ needs.validate.outputs.plain }}"
+          sed -i "s/^Version:.*/Version:        ${VERSION}/" "$SPEC"
+          echo "Updated $SPEC to version $VERSION"
+          cat "$SPEC"
+
+      - name: Create pull request
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          cd rpm-specfiles
+          BRANCH="update-oreon-defense-${{ needs.validate.outputs.tag }}"
+          git checkout -b "$BRANCH"
+          git config user.name "oreon-release-bot[bot]"
+          git config user.email "noreply@oreon.dev"
+          git add oreon-11-rp1/oreon-defense/oreon-defense.spec
+          git commit -m "chore: bump orm to ${{ needs.validate.outputs.tag }}" \
+            -m "Update Version field in oreon-defense.spec to ${{ needs.validate.outputs.plain }} following the release of ${{ needs.validate.outputs.tag }}."
+          git push origin "$BRANCH"
+          gh pr create \
+            --repo oreonhq/rpm-specfiles \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: bump oreon-defense to ${{ needs.validate.outputs.tag }}" \
+            --body "Automated spec version bump for oreon-defense ${{ needs.validate.outputs.tag }}."
