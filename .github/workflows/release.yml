@@ -69,6 +69,11 @@ jobs:
           set -e
           dnf install -y --setopt=install_weak_deps=False \
             qt6-qtbase-devel \
+            qt6-qtdeclarative-devel \
+            qt6-qtquickcontrols2-devel \
+            qt6-qt5compat-devel \
+            qt6-qtquickdialogs-devel \
+            clamav-devel \
             cmake \
             ninja-build \
             gcc-c++ \
