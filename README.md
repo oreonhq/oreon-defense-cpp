@@ -54,6 +54,9 @@ Most people never need to change anything. Everything is in the Settings page. T
 
 `scripts/verify_detection.sh` checks a build or an installed system. Run it with sudo to also test blocking. On a machine with Oreon Defense installed and running, use `sudo /usr/libexec/oreon-defense/test_installed_detection.sh`.
 
+## Why isn't there a large commit history?
+A common practice our team will make is to develop locally, then upload the tarball to our tarball dump (tarballs.oreonhq.com) which speeds up testing. We only push here once we get things working, and also once we have more than one person working on said project. Oreon Defense has been in development since roughly late 2025, with previous iterations being tested, and a couple rewrites.
+
 ## License
 
 See `LICENSE`. Copyright (C) 2026 Oreon HQ.
