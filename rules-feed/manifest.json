@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "version": 2026100301,
+  "sha256": "a61412a21c4ae2a3883a0809fbbed5f4ced688e75ba4e5bb3e309dd090c2a916",
+  "size": 3290,
+  "signature": "rules.yaml.sig",
+  "algorithm": "ed25519",
+  "published": "2026-10-04T04:49:53Z"
+}

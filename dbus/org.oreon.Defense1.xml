@@ -1,0 +1,13 @@
+<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node>
+  <interface name="org.oreon.Defense1">
+    <method name="GetStatus"/>
+    <method name="StartScan">
+      <arg direction="in" type="s" name="type"/>
+    </method>
+    <signal name="ThreatDetected">
+      <arg type="s" name="json"/>
+    </signal>
+  </interface>
+</node>

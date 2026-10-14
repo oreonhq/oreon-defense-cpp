@@ -1,0 +1,4 @@
+#!/bin/sh
+# fake miner name pattern for process/cmdline rules
+# xmrig-like demo marker OREON_FAKE_XMRIG
+echo fake

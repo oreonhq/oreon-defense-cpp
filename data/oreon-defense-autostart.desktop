@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Oreon Defense
+Comment=Start Oreon Defense tray at login
+Exec=oreon-defense --tray
+Icon=oreon-defense
+Terminal=false
+Categories=System;Security;Qt;
+X-GNOME-Autostart-enabled=true
+Hidden=false
+NoDisplay=true

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Oreon Defense
+GenericName=Security Suite
+Comment=A security app for Oreon. Straightforward protection and visibility with real-time alerts.
+Exec=oreon-defense
+Icon=oreon-defense
+Terminal=false
+Categories=System;Security;Qt;
+Keywords=antivirus;security;malware;quarantine;
+StartupNotify=true
+X-KDE-StartupNotify=true

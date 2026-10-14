@@ -1,0 +1,8 @@
+[Unit]
+Description=Oreon Defense scheduled quick scan
+After=oreon-defense.service
+Requires=oreon-defense.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/oreon-defense/trigger-scan.sh

@@ -1,0 +1,97 @@
+# Oreon Defense rule feed
+# Served from https://od-rules.oreonhq.com/rules.yaml
+# Bump "version" on every publish. Clients refuse a lower version.
+# Sign with: scripts/sign-rules.sh sign KEY rules-feed/rules.yaml
+version: 2026100301
+published: "2026-10-03"
+
+rules:
+  - id: eicar-test
+    name: EICAR Test File
+    description: Standard antivirus test signature
+    severity: high
+    enabled: true
+    hashes:
+      - 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+    content_patterns:
+      - EICAR-STANDARD-ANTIVIRUS-TEST-FILE
+
+  - id: oreon-demo-malware
+    name: Oreon Demo Malware
+    description: Harmless demo fixture shipped with Oreon Defense
+    severity: high
+    enabled: true
+    hashes:
+      - b88b1b1ce0d64e8568f7884d434fb1b95dcdaf320f998cfd27015b468f89ef24
+    content_patterns:
+      - OREON_DEMO_MALWARE_PAYLOAD
+    path_patterns:
+      - 'oreon_demo_malware\.sh$'
+
+  - id: fake-xmrig
+    name: Fake crypto miner marker
+    description: Demo cmdline and content pattern for miner-like activity
+    severity: critical
+    enabled: true
+    # kill when the process itself is the miner (name or exe). A cmdline
+    # that only mentions the marker (grep, editors) is reported, not killed.
+    kill: true
+    kill_cmdline: false
+    content_patterns:
+      - OREON_FAKE_XMRIG
+    name_patterns:
+      - xmrig
+      - suspicious_miner
+    cmdline_patterns:
+      - xmrig
+      - OREON_FAKE_XMRIG
+
+  - id: pipe-exec
+    name: Remote pipe execution
+    description: curl or wget piped to shell
+    severity: high
+    enabled: true
+    # alert only, installers do this too
+    kill: false
+    cmdline_patterns:
+      - 'curl.*\|.*(ba)?sh'
+      - 'wget.*\|.*(ba)?sh'
+      - 'base64 +-d'
+
+  - id: tmp-elf-heuristic
+    name: Suspicious ELF drop
+    description: Unknown program dropped in a temp, Downloads or Desktop folder
+    # Low confidence: reported as suspicious, never blocked or moved. Copies
+    # of system binaries, dracut and kernel-install trees, package manager
+    # caches and files written by rpm, dnf, dracut or an installer are
+    # skipped, and files without the exec bit are left alone.
+    severity: low
+    enabled: true
+    elf_heuristic: true
+
+  - id: persistence-autostart
+    name: Autostart persistence hint
+    description: Autostart entry runs something from a user writable or hidden folder or uses download or shell tricks
+    # Low confidence. The entry's Exec line decides: programs from /usr or
+    # /opt and copies of the system entry are fine.
+    severity: low
+    enabled: true
+    kill: false
+    autostart_heuristic: true
+    cmdline_patterns:
+      - /etc/cron
+
+# Addresses and ranges blocked with nftables (table inet oreon_defense).
+# Plain strings or maps with ip and reason. Loopback, multicast and
+# ranges wider than /8 (IPv4) or /16 (IPv6) are ignored by the client.
+# The entries below are documentation ranges (RFC 5737, RFC 3849) used
+# as examples. Replace them with real indicators.
+network_blocklist:
+  - ip: 192.0.2.66
+    reason: Example command and control server (TEST-NET-1)
+  - ip: 198.51.100.0/24
+    reason: Example malware distribution range (TEST-NET-2)
+  - ip: 203.0.113.13
+    reason: Example miner pool (TEST-NET-3)
+  - ip: 2001:db8:dead:beef::/64
+    reason: Example IPv6 range (RFC 3849)

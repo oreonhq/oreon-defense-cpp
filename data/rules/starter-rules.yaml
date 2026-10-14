@@ -1,0 +1,66 @@
+# oreon defense starter rules
+version: 1
+rules:
+  - id: eicar-test
+    name: EICAR Test File
+    description: Standard antivirus test signature
+    severity: high
+    enabled: true
+    hashes:
+      - 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
+    content_patterns:
+      - EICAR-STANDARD-ANTIVIRUS-TEST-FILE
+
+  - id: oreon-demo-malware
+    name: Oreon Demo Malware
+    description: Harmless demo fixture shipped with Oreon Defense
+    severity: high
+    enabled: true
+    hashes:
+      - b88b1b1ce0d64e8568f7884d434fb1b95dcdaf320f998cfd27015b468f89ef24
+    content_patterns:
+      - OREON_DEMO_MALWARE_PAYLOAD
+    path_patterns:
+      - 'oreon_demo_malware\.sh$'
+
+  - id: fake-xmrig
+    name: Fake crypto miner marker
+    description: Demo cmdline and content pattern for miner-like activity
+    severity: critical
+    enabled: true
+    content_patterns:
+      - OREON_FAKE_XMRIG
+    name_patterns:
+      - xmrig
+      - suspicious_miner
+    cmdline_patterns:
+      - xmrig
+      - OREON_FAKE_XMRIG
+
+  - id: pipe-exec
+    name: Remote pipe execution
+    description: curl or wget piped to shell
+    severity: high
+    enabled: true
+    cmdline_patterns:
+      - 'curl.*\|.*(ba)?sh'
+      - 'wget.*\|.*(ba)?sh'
+      - 'base64 +-d'
+
+  - id: tmp-elf-heuristic
+    name: Suspicious ELF drop
+    description: ELF binary in Downloads tmp or Desktop with odd name
+    severity: medium
+    enabled: true
+    elf_heuristic: true
+
+  - id: persistence-autostart
+    name: Autostart persistence hint
+    description: Writing or referencing desktop autostart from odd process
+    severity: medium
+    enabled: true
+    cmdline_patterns:
+      - '.config/autostart'
+      - /etc/cron
+    path_patterns:
+      - '.config/autostart/.*\.desktop$'

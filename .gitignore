@@ -1,13 +1,29 @@
+# Build output
+build/
+build-*/
+_build/
 CMakeCache.txt
-CMakeFiles
-Makefile
-oreon-defense
-*_autogen
+CMakeFiles/
 cmake_install.cmake
-.qt
-*_qmltyperegistrations.cpp
-qmltypes
-.rcc
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+Makefile
+*.o
+*.a
 *.so
-build
-meta_types
+
+# Release artifacts
+*.tar.gz
+*.rpm
+
+# Signing keys (private key never belongs here)
+*.key
+
+# Editor and OS junk
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+*.user

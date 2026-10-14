@@ -1,0 +1,20 @@
+{
+  "watchPaths": [
+    "/home",
+    "/tmp"
+  ],
+  "exclusions": [
+    "/proc",
+    "/sys",
+    "/dev",
+    "/run",
+    "/var/lib/oreon-defense",
+    "/usr/share/oreon-defense"
+  ],
+  "fileRealtime": true,
+  "processWatch": true,
+  "networkWatch": true,
+  "scheduleType": "daily",
+  "scheduleHour": 3,
+  "scheduleMinute": 0
+}

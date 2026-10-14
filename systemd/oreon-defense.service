@@ -1,0 +1,25 @@
+[Unit]
+Description=Oreon Defense protection daemon
+Documentation=file:///usr/share/doc/oreon-defense/README.md
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/oreon-defense-daemon
+Restart=on-failure
+RestartSec=3
+# state
+StateDirectory=oreon-defense
+RuntimeDirectory=oreon-defense
+RuntimeDirectoryMode=0755
+ConfigurationDirectory=oreon-defense
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/oreon-defense /run/oreon-defense /tmp /home
+PrivateTmp=false
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
