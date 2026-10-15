@@ -22,12 +22,13 @@ void Config::applyDefaults() {
   cfg_.scheduleType = "none";
 
   std::string home = homeDir();
-  cfg_.watchPaths = {
-    home + "/Downloads",
-    home + "/Desktop",
-    home + "/Documents",
-    "/tmp"
-  };
+  if (isRoot()) {
+    cfg_.watchPaths = {"/home", "/tmp"};
+    cfg_.onAccessPaths = {"/home", "/root", "/tmp", "/var/tmp", "/dev/shm"};
+  } else {
+    cfg_.watchPaths = {home + "/Downloads", home + "/Desktop", home + "/Documents", "/tmp"};
+    cfg_.onAccessPaths = {home, "/tmp"};
+  }
   cfg_.exclusions = {
     home + "/.cache",
     home + "/.local/share/oreon-defense",
@@ -37,6 +38,42 @@ void Config::applyDefaults() {
     "/dev",
     "/run"
   };
+  cfg_.clamavEnabled = true;
+  cfg_.clamavDbDir = "/var/lib/clamav";
+  cfg_.clamavMaxFileMb = 100;
+  cfg_.onAccessBlocking = true;
+  cfg_.onAccessScanOpen = true;
+  cfg_.onAccessTimeoutMs = 3000;
+  cfg_.onAccessMaxFileMb = 32;
+  cfg_.killMalicious = true;
+  cfg_.networkBlocking = true;
+  cfg_.rulesAutoUpdate = true;
+  cfg_.rulesUrl = "https://od-rules.oreonhq.com";
+  cfg_.rulesUpdateHours = 6;
+  cfg_.rulesPublicKey = defaultPublicKeyPath();
+  cfg_.fileScanMaxFileMb = 200;
+  cfg_.ransomShield = true;
+  cfg_.execProtection = true;
+  cfg_.persistenceGuard = true;
+  cfg_.revShellWatch = true;
+  cfg_.privEscWatch = true;
+  cfg_.execAllowList = {};
+  cfg_.adminGroups = {"wheel"};
+}
+
+template <typename T>
+static void take(const json& j, const char* key, T& dst) {
+  if (!j.contains(key)) return;
+  try {
+    dst = j.at(key).get<T>();
+  } catch (const std::exception& e) {
+    std::cerr << "config: ignoring bad value for " << key << ": " << e.what() << "\n";
+  }
+}
+
+static void clampInt(int& v, int lo, int hi) {
+  if (v < lo) v = lo;
+  if (v > hi) v = hi;
 }
 
 bool Config::load(const std::string& path) {
@@ -53,28 +90,59 @@ bool Config::load(const std::string& path) {
     save(path_);
     return true;
   }
+  json j;
   try {
-    json j;
     in >> j;
-    if (j.contains("watchPaths")) cfg_.watchPaths = j["watchPaths"].get<std::vector<std::string>>();
-    if (j.contains("exclusions")) cfg_.exclusions = j["exclusions"].get<std::vector<std::string>>();
-    cfg_.quarantineDir = j.value("quarantineDir", cfg_.quarantineDir);
-    cfg_.dataDir = j.value("dataDir", cfg_.dataDir);
-    cfg_.rulesPath = j.value("rulesPath", cfg_.rulesPath);
-    cfg_.socketPath = j.value("socketPath", cfg_.socketPath);
-    cfg_.logPath = j.value("logPath", cfg_.logPath);
-    cfg_.fileRealtime = j.value("fileRealtime", true);
-    cfg_.processWatch = j.value("processWatch", true);
-    cfg_.networkWatch = j.value("networkWatch", true);
-    cfg_.networkPollMs = j.value("networkPollMs", 2000);
-    cfg_.processPollMs = j.value("processPollMs", 1500);
-    cfg_.scheduleHour = j.value("scheduleHour", -1);
-    cfg_.scheduleMinute = j.value("scheduleMinute", 0);
-    cfg_.scheduleType = j.value("scheduleType", "none");
   } catch (const std::exception& e) {
-    std::cerr << "config load error: " << e.what() << "\n";
-    return false;
+    std::cerr << "config parse error, using defaults: " << e.what() << "\n";
+    return true;
   }
+  if (!j.is_object()) return true;
+  take(j, "watchPaths", cfg_.watchPaths);
+  take(j, "exclusions", cfg_.exclusions);
+  take(j, "quarantineDir", cfg_.quarantineDir);
+  take(j, "dataDir", cfg_.dataDir);
+  take(j, "rulesPath", cfg_.rulesPath);
+  take(j, "socketPath", cfg_.socketPath);
+  take(j, "logPath", cfg_.logPath);
+  take(j, "fileRealtime", cfg_.fileRealtime);
+  take(j, "processWatch", cfg_.processWatch);
+  take(j, "networkWatch", cfg_.networkWatch);
+  take(j, "networkPollMs", cfg_.networkPollMs);
+  take(j, "processPollMs", cfg_.processPollMs);
+  take(j, "scheduleHour", cfg_.scheduleHour);
+  take(j, "scheduleMinute", cfg_.scheduleMinute);
+  take(j, "scheduleType", cfg_.scheduleType);
+  take(j, "clamavEnabled", cfg_.clamavEnabled);
+  take(j, "clamavDbDir", cfg_.clamavDbDir);
+  take(j, "clamavMaxFileMb", cfg_.clamavMaxFileMb);
+  take(j, "onAccessBlocking", cfg_.onAccessBlocking);
+  take(j, "onAccessScanOpen", cfg_.onAccessScanOpen);
+  take(j, "onAccessPaths", cfg_.onAccessPaths);
+  take(j, "onAccessTimeoutMs", cfg_.onAccessTimeoutMs);
+  take(j, "onAccessMaxFileMb", cfg_.onAccessMaxFileMb);
+  take(j, "killMalicious", cfg_.killMalicious);
+  take(j, "networkBlocking", cfg_.networkBlocking);
+  take(j, "rulesAutoUpdate", cfg_.rulesAutoUpdate);
+  take(j, "rulesUrl", cfg_.rulesUrl);
+  take(j, "rulesUpdateHours", cfg_.rulesUpdateHours);
+  take(j, "rulesPublicKey", cfg_.rulesPublicKey);
+  take(j, "fileScanMaxFileMb", cfg_.fileScanMaxFileMb);
+  take(j, "ransomShield", cfg_.ransomShield);
+  take(j, "execProtection", cfg_.execProtection);
+  take(j, "persistenceGuard", cfg_.persistenceGuard);
+  take(j, "revShellWatch", cfg_.revShellWatch);
+  take(j, "privEscWatch", cfg_.privEscWatch);
+  take(j, "execAllowList", cfg_.execAllowList);
+  take(j, "adminGroups", cfg_.adminGroups);
+  clampInt(cfg_.networkPollMs, 500, 60000);
+  clampInt(cfg_.processPollMs, 200, 60000);
+  clampInt(cfg_.onAccessTimeoutMs, 200, 30000);
+  clampInt(cfg_.onAccessMaxFileMb, 1, 1024);
+  clampInt(cfg_.clamavMaxFileMb, 1, 2048);
+  clampInt(cfg_.fileScanMaxFileMb, 1, 4096);
+  clampInt(cfg_.rulesUpdateHours, 1, 24 * 7);
+  if (cfg_.rulesPublicKey.empty()) cfg_.rulesPublicKey = defaultPublicKeyPath();
   return true;
 }
 
@@ -97,12 +165,40 @@ bool Config::save(const std::string& path) const {
     {"processPollMs", cfg_.processPollMs},
     {"scheduleHour", cfg_.scheduleHour},
     {"scheduleMinute", cfg_.scheduleMinute},
-    {"scheduleType", cfg_.scheduleType}
+    {"scheduleType", cfg_.scheduleType},
+    {"clamavEnabled", cfg_.clamavEnabled},
+    {"clamavDbDir", cfg_.clamavDbDir},
+    {"clamavMaxFileMb", cfg_.clamavMaxFileMb},
+    {"onAccessBlocking", cfg_.onAccessBlocking},
+    {"onAccessScanOpen", cfg_.onAccessScanOpen},
+    {"onAccessPaths", cfg_.onAccessPaths},
+    {"onAccessTimeoutMs", cfg_.onAccessTimeoutMs},
+    {"onAccessMaxFileMb", cfg_.onAccessMaxFileMb},
+    {"killMalicious", cfg_.killMalicious},
+    {"networkBlocking", cfg_.networkBlocking},
+    {"rulesAutoUpdate", cfg_.rulesAutoUpdate},
+    {"rulesUrl", cfg_.rulesUrl},
+    {"rulesUpdateHours", cfg_.rulesUpdateHours},
+    {"rulesPublicKey", cfg_.rulesPublicKey},
+    {"fileScanMaxFileMb", cfg_.fileScanMaxFileMb},
+    {"ransomShield", cfg_.ransomShield},
+    {"execProtection", cfg_.execProtection},
+    {"persistenceGuard", cfg_.persistenceGuard},
+    {"revShellWatch", cfg_.revShellWatch},
+    {"privEscWatch", cfg_.privEscWatch},
+    {"execAllowList", cfg_.execAllowList},
+    {"adminGroups", cfg_.adminGroups}
   };
-  std::ofstream out(p);
-  if (!out) return false;
-  out << j.dump(2) << "\n";
-  return true;
+  std::string tmp = p + ".tmp";
+  {
+    std::ofstream out(tmp);
+    if (!out) return false;
+    out << j.dump(2) << "\n";
+    if (!out) return false;
+  }
+  std::error_code ec;
+  fs::rename(tmp, p, ec);
+  return !ec;
 }
 
 } // namespace oreon

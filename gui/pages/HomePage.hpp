@@ -2,201 +2,241 @@
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
-#include <QCheckBox>
-#include <QGroupBox>
 #include <QFormLayout>
-#include <QTreeWidget>
-#include <QHeaderView>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QScrollArea>
-#include <QFrame>
 #include <QStyle>
 #include <QDateTime>
 #include <QLocale>
 #include <QJsonObject>
+#include <QTimer>
 #include "DaemonClient.hpp"
 #include "Theme.hpp"
+#include "TrayState.hpp"
 
 class HomePage : public QWidget {
   Q_OBJECT
 public:
   HomePage(DaemonClient* client, QWidget* parent = nullptr)
     : QWidget(parent), client_(client) {
-    auto* outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
+    auto* root = new QVBoxLayout(this);
+    root->setSpacing(Theme::spacing(this));
 
-    auto* scroll = new QScrollArea;
-    scroll->setWidgetResizable(true);
-    scroll->setFrameShape(QFrame::NoFrame);
-    auto* body = new QWidget;
-    auto* root = new QVBoxLayout(body);
-    root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(Theme::spacing(this) * 2);
-
-    // Status
     auto* statusRow = new QHBoxLayout;
     statusRow->setSpacing(Theme::spacing(this) * 2);
     statusIcon_ = new QLabel;
-    statusIcon_->setFixedSize(64, 64);
-    statusIcon_->setAlignment(Qt::AlignCenter);
-    auto* statusCol = new QVBoxLayout;
-    statusCol->setSpacing(2);
+    iconSize_ = style()->pixelMetric(QStyle::PM_LargeIconSize, nullptr, this) * 3 / 2;
+    statusIcon_->setFixedSize(iconSize_, iconSize_);
+    auto* statusText = new QVBoxLayout;
+    statusText->setSpacing(0);
     statusTitle_ = new QLabel;
-    statusTitle_->setFont(Theme::titleFont(statusTitle_->font(), 1.4));
-    statusSub_ = Theme::secondaryLabel(QString());
-    statusCol->addStretch();
-    statusCol->addWidget(statusTitle_);
-    statusCol->addWidget(statusSub_);
-    statusCol->addStretch();
-    statusRow->addWidget(statusIcon_, 0, Qt::AlignTop);
-    statusRow->addLayout(statusCol, 1);
-
-    auto* quick = new QPushButton(Theme::icon({"system-search", "edit-find"}), tr("Quick Scan"));
-    auto* full = new QPushButton(Theme::icon({"view-refresh"}), tr("Full Scan"));
-    quick->setToolTip(tr("Scan common places like Downloads and Desktop"));
-    full->setToolTip(tr("Scan the whole system"));
-    statusRow->addWidget(quick, 0, Qt::AlignVCenter);
-    statusRow->addWidget(full, 0, Qt::AlignVCenter);
+    statusTitle_->setFont(Theme::scaledFont(statusTitle_->font(), 1.5));
+    statusTitle_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    statusHint_ = new QLabel(tr("Start oreon-defense.service to turn on protection."));
+    statusHint_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    Theme::makeSecondary(statusHint_);
+    statusText->addStretch(1);
+    statusText->addWidget(statusTitle_);
+    statusText->addWidget(statusHint_);
+    statusText->addStretch(1);
+    statusRow->addWidget(statusIcon_, 0, Qt::AlignVCenter);
+    statusRow->addLayout(statusText, 1);
     root->addLayout(statusRow);
-    connect(quick, &QPushButton::clicked, this, [this] { client_->startScan("quick"); });
-    connect(full, &QPushButton::clicked, this, [this] { client_->startScan("full"); });
+    Theme::addSectionGap(root, this);
 
-    // Protection and summary side by side
-    auto* mid = new QHBoxLayout;
-    mid->setSpacing(Theme::spacing(this) * 2);
+    auto* content = new QVBoxLayout;
+    content->setSpacing(Theme::spacing(this));
+    content->setContentsMargins(iconSize_ + statusRow->spacing(), 0, 0, 0);
+    root->addLayout(content);
 
-    auto* protBox = new QGroupBox(tr("Protection"));
-    auto* protLay = new QVBoxLayout(protBox);
-    file_ = addToggle(protLay, tr("Real-time file protection"),
-                      tr("Watch Downloads, Desktop, and other folders for threats."));
-    proc_ = addToggle(protLay, tr("Process monitoring"),
-                      tr("Watch new processes for suspicious behavior."));
-    net_ = addToggle(protLay, tr("Network monitoring"),
-                     tr("Flag risky listening ports and connections."));
-    protLay->addStretch();
-    mid->addWidget(protBox, 3);
-
-    auto* sumBox = new QGroupBox(tr("Summary"));
-    auto* form = new QFormLayout(sumBox);
-    threatsVal_ = new QLabel(QStringLiteral("0"));
-    quarVal_ = new QLabel(QStringLiteral("0"));
-    lastScanVal_ = new QLabel(tr("Never"));
-    form->addRow(tr("Active threats:"), threatsVal_);
-    form->addRow(tr("In quarantine:"), quarVal_);
-    form->addRow(tr("Last scan:"), lastScanVal_);
-    mid->addWidget(sumBox, 2);
-    root->addLayout(mid);
-
-    auto sync = [this] {
-      client_->setProtection(file_->isChecked(), proc_->isChecked(), net_->isChecked());
+    form_ = Theme::form(this);
+    auto value = [] {
+      auto* l = new QLabel;
+      l->setTextInteractionFlags(Qt::TextSelectableByMouse);
+      return l;
     };
-    connect(file_, &QCheckBox::toggled, this, sync);
-    connect(proc_, &QCheckBox::toggled, this, sync);
-    connect(net_, &QCheckBox::toggled, this, sync);
+    realtimeVal_ = value();
+    threatsVal_ = value();
+    sigVal_ = value();
+    rulesVal_ = value();
+    lastScanVal_ = value();
+    form_->addRow(tr("Real-time protection:"), realtimeVal_);
+    form_->addRow(tr("Active threats:"), threatsVal_);
+    form_->addRow(tr("Virus signatures:"), sigVal_);
+    form_->addRow(tr("Detection rules:"), rulesVal_);
+    form_->addRow(tr("Last scan:"), lastScanVal_);
+    content->addLayout(form_);
+    Theme::addSectionGap(content, this);
 
-    // Recent activity
-    auto* actBox = new QGroupBox(tr("Recent Activity"));
-    auto* actLay = new QVBoxLayout(actBox);
-    activity_ = new QTreeWidget;
-    activity_->setHeaderLabels({tr("Time"), tr("Type"), tr("Details")});
-    activity_->setRootIsDecorated(false);
-    activity_->setUniformRowHeights(true);
-    activity_->setSelectionMode(QAbstractItemView::NoSelection);
-    activity_->setFocusPolicy(Qt::NoFocus);
-    activity_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    activity_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    activity_->header()->setStretchLastSection(true);
-    activity_->setMinimumHeight(160);
-    actLay->addWidget(activity_);
-    root->addWidget(actBox, 1);
+    auto* buttons = new QHBoxLayout;
+    buttons->setSpacing(Theme::spacing(this));
+    quick_ = new QPushButton(Theme::icon({"system-search", "edit-find"}), tr("Quick Scan"));
+    quick_->setToolTip(tr("Scan common places like Downloads and Desktop"));
+    update_ = new QPushButton(Theme::icon({"update-none", "download", "view-refresh"}), tr("Update Rules"));
+    update_->setToolTip(tr("Download the latest signed detection rules"));
+    buttons->addWidget(quick_);
+    buttons->addWidget(update_);
+    buttons->addStretch(1);
+    content->addLayout(buttons);
+    root->addStretch(1);
 
-    scroll->setWidget(body);
-    outer->addWidget(scroll);
+    connect(quick_, &QPushButton::clicked, this, [this] { client_->startScan("quick"); });
+    connect(update_, &QPushButton::clicked, this, [this] { client_->updateRulesNow(); });
 
     setOffline();
+
+    auto* refresh = new QTimer(this);
+    connect(refresh, &QTimer::timeout, this, [this] {
+      if (connected_ && isVisible()) client_->getStatus();
+    });
+    refresh->start(10000);
 
     connect(client_, &DaemonClient::statusUpdated, this, &HomePage::onStatus);
     connect(client_, &DaemonClient::connectedChanged, this, [this](bool ok) {
       connected_ = ok;
       if (!ok) setOffline();
     });
-    connect(client_, &DaemonClient::logEvent, this, [this](const QJsonObject& e) {
-      pushActivity(e.value("category").toString(), e.value("message").toString());
-    });
-    connect(client_, &DaemonClient::threatEvent, this, [this](const QJsonObject& t) {
-      pushActivity("threat", t.value("name").toString());
+    connect(client_, &DaemonClient::threatEvent, this, [this](const QJsonObject&) {
       client_->getStatus();
+    });
+    connect(client_, &DaemonClient::rulesUpdated, this, [this](const QJsonObject& r) {
+      showRules(r);
     });
   }
 
 private:
-  QCheckBox* addToggle(QVBoxLayout* lay, const QString& title, const QString& subtitle) {
-    auto* box = new QCheckBox(title);
-    box->setChecked(true);
-    lay->addWidget(box);
-    auto* hint = Theme::secondaryLabel(subtitle);
-    const int indent = style()->pixelMetric(QStyle::PM_IndicatorWidth, nullptr, box) +
-                       style()->pixelMetric(QStyle::PM_CheckBoxLabelSpacing, nullptr, box);
-    hint->setContentsMargins(indent, 0, 0, Theme::spacing(this));
-    lay->addWidget(hint);
-    return box;
+  void setStatus(const QStringList& icons, const QString& title) {
+    statusIcon_->setPixmap(Theme::icon(icons).pixmap(iconSize_, iconSize_));
+    statusTitle_->setText(title);
   }
 
-  void setStatus(const QStringList& icons, const QString& title, const QString& sub) {
-    statusIcon_->setPixmap(Theme::icon(icons).pixmap(64, 64));
-    statusTitle_->setText(title);
-    statusSub_->setText(sub);
+  void setFactsVisible(bool on) {
+    for (int i = 0; i < form_->rowCount(); ++i) form_->setRowVisible(i, on);
+    quick_->setEnabled(on);
+    update_->setEnabled(on);
   }
 
   void setOffline() {
-    setStatus({"security-low", "dialog-error"}, tr("Not connected"),
-              tr("The Oreon Defense service is not running. Start oreon-defense-daemon to turn on protection."));
+    setStatus({"security-low", "dialog-error"}, tr("Service not running"));
+    statusHint_->show();
+    setFactsVisible(false);
   }
 
   void onStatus(const QJsonObject& s) {
     connected_ = true;
-    const bool ok = s.value("protected").toBool(true);
-    const QString text = s.value("statusText").toString(ok ? tr("Protected") : tr("At risk"));
-    if (ok)
-      setStatus({"security-high", "emblem-ok"}, text, tr("Real-time protection is on and no threats are active."));
-    else if (text.contains("off", Qt::CaseInsensitive))
-      setStatus({"security-medium", "dialog-warning"}, text, tr("Turn on at least one protection option below."));
-    else
-      setStatus({"security-low", "dialog-warning"}, text, tr("Threats were found. Review them on the Threats page."));
+    statusHint_->hide();
+    setFactsVisible(true);
 
-    threatsVal_->setText(QString::number(s.value("threatCount").toVariant().toULongLong()));
-    quarVal_->setText(QString::number(s.value("quarantineCount").toVariant().toULongLong()));
-    const qint64 last = s.value("lastScan").toVariant().toLongLong();
-    if (last <= 0) lastScanVal_->setText(tr("Never"));
-    else lastScanVal_->setText(QLocale().toString(QDateTime::fromSecsSinceEpoch(last), QLocale::ShortFormat));
+    const bool fileRt = s.value("fileRealtime").toBool(true);
+    const bool proc = s.value("processWatch").toBool(true);
+    const bool net = s.value("networkWatch").toBool(true);
+    const qulonglong threats = s.value("threatCount").toVariant().toULongLong();
+    const auto p = TrayState::evaluate(s, true, false, -1);
+    switch (p.state) {
+    case TrayState::State::AtRisk:
+      setStatus({"security-low", "dialog-warning"}, tr("At risk"));
+      break;
+    case TrayState::State::Off:
+      setStatus({"security-medium", "dialog-warning"}, tr("Protection is off"));
+      break;
+    case TrayState::State::PartlyOff:
+      setStatus({"security-medium", "dialog-warning"}, tr("Protection is partly off"));
+      break;
+    case TrayState::State::OutOfDate:
+      setStatus({"security-medium", "dialog-warning"}, tr("Virus signatures need attention"));
+      break;
+    default:
+      setStatus({"security-high", "emblem-ok"}, tr("Protected"));
+      break;
+    }
 
-    QSignalBlocker b1(file_), b2(proc_), b3(net_);
-    file_->setChecked(s.value("fileRealtime").toBool(true));
-    proc_->setChecked(s.value("processWatch").toBool(true));
-    net_->setChecked(s.value("networkWatch").toBool(true));
+    form_->setRowVisible(threatsVal_, threats > 0);
+    threatsVal_->setText(QString::number(threats));
+
+    QString rt = fileRt ? tr("On") : tr("Off");
+    QStringList tip;
+    if (s.contains("onAccess")) {
+      const QJsonObject o = s.value("onAccess").toObject();
+      const QString mode = o.value("mode").toString();
+      if (!o.value("enabled").toBool(true) || mode == QLatin1String("off"))
+        tip << tr("Blocking before files open: off");
+      else if (mode == QLatin1String("fanotify"))
+        tip << tr("Blocking before files open: on, %1 blocked so far")
+                 .arg(QLocale().toString(o.value("denied").toVariant().toULongLong()));
+      else {
+        if (fileRt) rt = tr("Limited");
+        tip << tr("Blocking before files open: not available, new files are checked after they are written");
+      }
+    }
+    tip << (proc ? tr("Process monitoring: on") : tr("Process monitoring: off"));
+    tip << (net ? tr("Network monitoring: on") : tr("Network monitoring: off"));
+    if (s.contains("networkBlocking")) {
+      const QJsonObject n = s.value("networkBlocking").toObject();
+      if (!n.value("enabled").toBool(true)) tip << tr("Network blocking: off");
+      else if (n.value("active").toBool())
+        tip << tr("Network blocking: on, %1 blocked addresses")
+                 .arg(QLocale().toString(n.value("count").toInt()));
+      else tip << tr("Network blocking: not active");
+    }
+    realtimeVal_->setText(rt);
+    realtimeVal_->setToolTip(tip.join(QLatin1Char('\n')));
+
+    if (s.contains("clamav")) {
+      const QJsonObject c = s.value("clamav").toObject();
+      if (!c.value("enabled").toBool(true)) {
+        sigVal_->setText(tr("Off"));
+        sigVal_->setToolTip(QString());
+      } else if (c.value("available").toBool()) {
+        const qint64 db = c.value("dbTime").toVariant().toLongLong();
+        const QString date = db > 0
+          ? QLocale().toString(QDateTime::fromSecsSinceEpoch(db).date(), QLocale::ShortFormat)
+          : tr("unknown date");
+        sigVal_->setText(tr("ClamAV database %1, %2")
+          .arg(c.value("dailyVersion").toInt()).arg(date));
+        sigVal_->setToolTip(tr("ClamAV %1, %2 signatures")
+          .arg(c.value("libVersion").toString(),
+               QLocale().toString(c.value("signatures").toVariant().toULongLong())));
+      } else if (c.value("loading").toBool()) {
+        sigVal_->setText(tr("Loading"));
+      } else {
+        sigVal_->setText(tr("Not available"));
+        sigVal_->setToolTip(c.value("error").toString());
+      }
+    } else {
+      sigVal_->setText(tr("Unknown"));
+    }
+
+    if (s.contains("rules")) showRules(s.value("rules").toObject());
+    else rulesVal_->setText(tr("Unknown"));
+
+    lastScanVal_->setText(Theme::when(s.value("lastScan").toVariant().toLongLong()));
   }
 
-  void pushActivity(const QString& cat, const QString& msg) {
-    auto* item = new QTreeWidgetItem({QLocale().toString(QTime::currentTime(), QLocale::ShortFormat),
-                                      Theme::capitalized(cat), msg});
-    if (cat == QLatin1String("threat"))
-      item->setIcon(1, Theme::icon({"dialog-warning"}));
-    activity_->insertTopLevelItem(0, item);
-    while (activity_->topLevelItemCount() > 40)
-      delete activity_->takeTopLevelItem(activity_->topLevelItemCount() - 1);
+  void showRules(const QJsonObject& r) {
+    QString t = tr("Version %1").arg(r.value("version").toVariant().toLongLong());
+    const QString err = r.value("lastError").toString();
+    if (r.value("running").toBool()) t += tr(", checking for updates");
+    else if (!err.isEmpty()) t += tr(", last update failed");
+    rulesVal_->setText(t);
+    QString tip = tr("%1 rules, last checked %2")
+      .arg(QLocale().toString(r.value("count").toInt()),
+           Theme::when(r.value("lastCheck").toVariant().toLongLong()));
+    if (!err.isEmpty()) tip += QLatin1Char('\n') + err;
+    rulesVal_->setToolTip(tip);
   }
 
   DaemonClient* client_;
   bool connected_{false};
+  int iconSize_{48};
   QLabel* statusIcon_;
   QLabel* statusTitle_;
-  QLabel* statusSub_;
+  QLabel* statusHint_;
+  QFormLayout* form_;
+  QLabel* realtimeVal_;
   QLabel* threatsVal_;
-  QLabel* quarVal_;
+  QLabel* sigVal_;
+  QLabel* rulesVal_;
   QLabel* lastScanVal_;
-  QCheckBox* file_;
-  QCheckBox* proc_;
-  QCheckBox* net_;
-  QTreeWidget* activity_;
+  QPushButton* quick_;
+  QPushButton* update_;
 };

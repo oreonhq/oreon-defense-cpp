@@ -51,6 +51,7 @@ void DaemonClient::onConnected() {
   getNetwork();
   getHistory();
   getConfig();
+  getBlocklist();
 }
 
 void DaemonClient::onDisconnected() {
@@ -102,6 +103,8 @@ void DaemonClient::handleLine(const QByteArray& line) {
     else if (ev == "status") emit statusUpdated(data);
     else if (ev == "log") emit logEvent(data);
     else if (ev == "network") emit networkEvent(data);
+    else if (ev == "rulesUpdate") emit rulesUpdated(data);
+    else if (ev == "blocklist") getBlocklist();
     return;
   }
 
@@ -113,7 +116,12 @@ void DaemonClient::handleLine(const QByteArray& line) {
     auto cb = pending_.take(id);
     if (cb) cb(ok, result, error);
   }
-  if (!ok && !error.isEmpty()) emit errorMessage(error);
+  if (!ok && !error.isEmpty()) {
+    if (obj.value("code").toString() == QLatin1String("EPERM"))
+      emit errorMessage(tr("You are not allowed to do that. %1").arg(error));
+    else
+      emit errorMessage(error);
+  }
 }
 
 void DaemonClient::getStatus() {
@@ -154,7 +162,11 @@ void DaemonClient::getQuarantine() {
 }
 
 void DaemonClient::quarantinePath(const QString& path, const QString& id) {
-  call("quarantine", {{"path", path}, {"id", id}}, [this](bool, const QJsonObject&, const QString&) {
+  QJsonObject p;
+  if (!path.isEmpty()) p["path"] = path;
+  if (!id.isEmpty()) p["id"] = id;
+  call("quarantine", p, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("quarantine"), ok, err);
     getQuarantine();
     getThreats();
     getStatus();
@@ -162,21 +174,26 @@ void DaemonClient::quarantinePath(const QString& path, const QString& id) {
 }
 
 void DaemonClient::restore(const QString& id) {
-  call("restore", {{"id", id}}, [this](bool, const QJsonObject&, const QString&) {
+  call("restore", {{"id", id}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("restore"), ok, err);
+    getThreats();
     getQuarantine();
     getStatus();
   });
 }
 
 void DaemonClient::deleteQuarantine(const QString& id) {
-  call("deleteQuarantine", {{"id", id}}, [this](bool, const QJsonObject&, const QString&) {
+  call("deleteQuarantine", {{"id", id}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("delete"), ok, err);
+    getThreats();
     getQuarantine();
     getStatus();
   });
 }
 
 void DaemonClient::allowPath(const QString& path) {
-  call("allow", {{"path", path}}, [this](bool, const QJsonObject&, const QString&) {
+  call("allow", {{"path", path}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("allow"), ok, err);
     getThreats();
     getStatus();
   });
@@ -202,7 +219,8 @@ void DaemonClient::getConfig() {
 }
 
 void DaemonClient::setConfig(const QJsonObject& cfg) {
-  call("setConfig", cfg, [this](bool ok, const QJsonObject&, const QString&) {
+  call("setConfig", cfg, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("setConfig"), ok, err);
     if (ok) getConfig();
   });
 }
@@ -210,5 +228,54 @@ void DaemonClient::setConfig(const QJsonObject& cfg) {
 void DaemonClient::updateRules(const QString& path) {
   QJsonObject p;
   if (!path.isEmpty()) p["path"] = path;
-  call("updateRules", p);
+  else p["reloadOnly"] = true;
+  call("updateRules", p, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("reloadRules"), ok, err);
+    if (ok) getStatus();
+  });
+}
+
+void DaemonClient::reloadRules() { updateRules(); }
+
+void DaemonClient::updateRulesNow(bool force) {
+  call("updateRules", {{"force", force}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("updateRules"), ok, err);
+  });
+}
+
+void DaemonClient::setOptions(const QJsonObject& opts) {
+  call("setOptions", opts, [this](bool ok, const QJsonObject& r, const QString& err) {
+    emit actionDone(QStringLiteral("setOptions"), ok, err);
+    if (ok) emit statusUpdated(r);
+    getConfig();
+  });
+}
+
+void DaemonClient::getBlocklist() {
+  call("getBlocklist", {}, [this](bool ok, const QJsonObject& r, const QString&) {
+    if (ok) emit blocklistList(r.value("entries").toArray(), r.value("active").toBool());
+  });
+}
+
+void DaemonClient::blockIp(const QString& ip, const QString& reason) {
+  QJsonObject p{{"ip", ip}};
+  if (!reason.isEmpty()) p["reason"] = reason;
+  call("blockIp", p, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("block"), ok, err);
+    getBlocklist();
+  });
+}
+
+void DaemonClient::unblockIp(const QString& ip) {
+  call("unblockIp", {{"ip", ip}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("unblock"), ok, err);
+    getBlocklist();
+  });
+}
+
+void DaemonClient::killProcess(int pid) {
+  call("killProcess", {{"pid", pid}}, [this](bool ok, const QJsonObject&, const QString& err) {
+    emit actionDone(QStringLiteral("kill"), ok, err);
+    getThreats();
+  });
 }

@@ -1,25 +1,47 @@
 [Unit]
 Description=Oreon Defense protection daemon
 Documentation=file:///usr/share/doc/oreon-defense/README.md
-After=network.target
+After=network-online.target clamav-freshclam.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/oreon-defense-daemon
-Restart=on-failure
+Restart=always
 RestartSec=3
+TimeoutStopSec=20
+KillMode=mixed
+OOMScoreAdjust=-500
+
 # state
 StateDirectory=oreon-defense
+StateDirectoryMode=0700
 RuntimeDirectory=oreon-defense
 RuntimeDirectoryMode=0755
 ConfigurationDirectory=oreon-defense
-# hardening
+
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_NET_ADMIN CAP_KILL CAP_SYS_PTRACE CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_FOWNER CAP_CHOWN
 NoNewPrivileges=true
+
+# hardening
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/oreon-defense /run/oreon-defense /tmp /home
+ProtectHome=no
+ReadWritePaths=/var/lib/oreon-defense /run/oreon-defense /tmp /var/tmp /dev/shm
+ReadWritePaths=-/home -/root -/var/home -/run/media -/media -/mnt -/srv -/opt -/usr/local
 PrivateTmp=false
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictRealtime=true
 RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

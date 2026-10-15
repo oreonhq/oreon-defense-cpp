@@ -7,6 +7,12 @@
 #include <iostream>
 #include <algorithm>
 #include <random>
+#include <sys/stat.h>
+#include <sys/xattr.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
 
 namespace oreon {
 namespace fs = std::filesystem;
@@ -24,9 +30,58 @@ void Quarantine::setDir(const std::string& dir) {
   ensureDir(dir_ + "/meta");
 }
 
-void Quarantine::saveMeta(const QuarantineItem& item) const {
+bool Quarantine::saveMeta(const QuarantineItem& item) const {
   std::ofstream out(item.metaPath);
-  if (out) out << quarantineToJson(item).dump(2) << "\n";
+  if (!out) return false;
+  out << quarantineToJson(item).dump(2) << "\n";
+  out.flush();
+  return static_cast<bool>(out);
+}
+
+static void setErr(std::string* err, const std::string& what, int e) {
+  if (err) *err = what + ": " + std::strerror(e);
+}
+
+bool Quarantine::moveFile(const std::string& from, const std::string& to, int mode, std::string* err) {
+  if (::rename(from.c_str(), to.c_str()) == 0) {
+    ::chmod(to.c_str(), static_cast<mode_t>(mode));
+    return true;
+  }
+  if (errno != EXDEV) {
+    setErr(err, "cannot move " + from, errno);
+    return false;
+  }
+  int in = ::open(from.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (in < 0) { setErr(err, "cannot open " + from, errno); return false; }
+  int out = ::open(to.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, static_cast<mode_t>(mode));
+  if (out < 0) { int e = errno; ::close(in); setErr(err, "cannot create " + to, e); return false; }
+  char buf[65536];
+  bool ok = true;
+  int e = 0;
+  for (;;) {
+    ssize_t n = ::read(in, buf, sizeof(buf));
+    if (n == 0) break;
+    if (n < 0) { if (errno == EINTR) continue; ok = false; e = errno; break; }
+    ssize_t off = 0;
+    while (off < n) {
+      ssize_t w = ::write(out, buf + off, static_cast<size_t>(n - off));
+      if (w < 0) { if (errno == EINTR) continue; ok = false; e = errno; break; }
+      off += w;
+    }
+    if (!ok) break;
+  }
+  if (ok && ::fsync(out) != 0) { ok = false; e = errno; }
+  if (::close(out) != 0 && ok) { ok = false; e = errno; }
+  ::close(in);
+  if (!ok) { ::unlink(to.c_str()); setErr(err, "cannot copy " + from, e); return false; }
+  ::fchmodat(AT_FDCWD, to.c_str(), static_cast<mode_t>(mode), 0);
+  if (::unlink(from.c_str()) != 0) {
+    e = errno;
+    ::unlink(to.c_str());
+    setErr(err, "cannot remove " + from, e);
+    return false;
+  }
+  return true;
 }
 
 void Quarantine::reload() {
@@ -49,16 +104,24 @@ void Quarantine::reload() {
       item.quarantinedAt = j.value("quarantinedAt", int64_t{0});
       item.metaPath = e.path().string();
       item.dataPath = j.value("dataPath", dir_ + "/data/" + item.id + ".bin");
+      item.ownerUid = j.value("ownerUid", -1);
+      item.originUrl = j.value("originUrl", "");
+      item.originalMode = j.value("originalMode", 0600);
       if (!item.id.empty()) items_.push_back(item);
     } catch (...) {}
   }
 }
 
-std::optional<QuarantineItem> Quarantine::quarantineFile(const std::string& path, const Threat& threat) {
+std::optional<QuarantineItem> Quarantine::quarantineFile(const std::string& path, const Threat& threat,
+                                                         std::string* err) {
   std::lock_guard<std::mutex> lock(mu_);
-  if (!fs::exists(path)) return std::nullopt;
-  if (!dir_.empty() && (path == dir_ || path.find(dir_ + "/") == 0))
+  struct stat lst{};
+  if (::lstat(path.c_str(), &lst) != 0) { setErr(err, "cannot find " + path, errno); return std::nullopt; }
+  if (!S_ISREG(lst.st_mode)) { if (err) *err = "not a regular file"; return std::nullopt; }
+  if (dir_.empty() || path == dir_ || path.find(dir_ + "/") == 0) {
+    if (err) *err = "already in quarantine";
     return std::nullopt;
+  }
 
   QuarantineItem item;
   item.id = makeId();
@@ -67,18 +130,30 @@ std::optional<QuarantineItem> Quarantine::quarantineFile(const std::string& path
   item.sha256 = threat.sha256.empty() ? sha256File(path) : threat.sha256;
   item.severity = threat.severity;
   item.quarantinedAt = nowEpoch();
+  struct stat ost{};
+  if (::stat(path.c_str(), &ost) == 0) {
+    item.ownerUid = static_cast<int>(ost.st_uid);
+    item.originalMode = static_cast<int>(ost.st_mode & 07777 & ~(S_ISUID | S_ISGID));
+  }
+  if (!threat.originUrl.empty()) {
+    item.originUrl = threat.originUrl;
+  } else {
+    char ob[4096];
+    ssize_t on = getxattr(path.c_str(), "user.xdg.origin.url", ob, sizeof(ob) - 1);
+    if (on > 0) item.originUrl.assign(ob, static_cast<size_t>(on));
+  }
   item.dataPath = dir_ + "/data/" + item.id + ".bin";
   item.metaPath = dir_ + "/meta/" + item.id + ".json";
 
-  std::error_code ec;
-  fs::rename(path, item.dataPath, ec);
-  if (ec) {
-    fs::copy_file(path, item.dataPath, fs::copy_options::overwrite_existing, ec);
-    if (ec) return std::nullopt;
-    fs::remove(path, ec);
-  }
+  if (!moveFile(path, item.dataPath, 0, err)) return std::nullopt;
+  if (::geteuid() == 0) (void)::chown(item.dataPath.c_str(), 0, 0);
 
-  saveMeta(item);
+  if (!saveMeta(item)) {
+    std::string ignore;
+    moveFile(item.dataPath, path, item.originalMode, &ignore);
+    if (err) *err = "cannot write quarantine record";
+    return std::nullopt;
+  }
   items_.push_back(item);
   return item;
 }
@@ -92,14 +167,17 @@ bool Quarantine::restore(const std::string& id, std::string* err) {
   }
   std::error_code ec;
   ensureDir(fs::path(it->originalPath).parent_path().string());
-  fs::rename(it->dataPath, it->originalPath, ec);
-  if (ec) {
-    fs::copy_file(it->dataPath, it->originalPath, fs::copy_options::overwrite_existing, ec);
-    if (ec) {
-      if (err) *err = ec.message();
-      return false;
-    }
-    fs::remove(it->dataPath, ec);
+  if (fs::exists(fs::symlink_status(it->originalPath, ec))) {
+    if (err) *err = "a file already exists at " + it->originalPath;
+    return false;
+  }
+  if (!moveFile(it->dataPath, it->originalPath, it->originalMode, err)) return false;
+  if (::geteuid() == 0 && it->ownerUid >= 0) {
+    struct stat pst{};
+    gid_t gid = 0;
+    if (::stat(fs::path(it->originalPath).parent_path().c_str(), &pst) == 0) gid = pst.st_gid;
+    (void)::chown(it->originalPath.c_str(), static_cast<uid_t>(it->ownerUid), gid);
+    ::chmod(it->originalPath.c_str(), static_cast<mode_t>(it->originalMode));
   }
   fs::remove(it->metaPath, ec);
   items_.erase(it);

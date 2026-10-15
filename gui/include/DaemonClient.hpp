@@ -34,6 +34,13 @@ public:
   void getConfig();
   void setConfig(const QJsonObject& cfg);
   void updateRules(const QString& path = {});
+  void reloadRules();
+  void updateRulesNow(bool force = false);
+  void setOptions(const QJsonObject& opts);
+  void getBlocklist();
+  void blockIp(const QString& ip, const QString& reason = {});
+  void unblockIp(const QString& ip);
+  void killProcess(int pid);
 
 signals:
   void connectedChanged(bool connected);
@@ -49,6 +56,9 @@ signals:
   void historyList(const QJsonArray& events);
   void configLoaded(const QJsonObject& cfg);
   void errorMessage(const QString& msg);
+  void blocklistList(const QJsonArray& entries, bool active);
+  void rulesUpdated(const QJsonObject& rules);
+  void actionDone(const QString& what, bool ok, const QString& error);
 
 private slots:
   void onConnected();

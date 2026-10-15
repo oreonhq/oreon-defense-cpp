@@ -49,18 +49,17 @@ rules:
 
   - id: tmp-elf-heuristic
     name: Suspicious ELF drop
-    description: ELF binary in Downloads tmp or Desktop with odd name
-    severity: medium
+    description: Unknown program dropped in a temp, Downloads or Desktop folder
+    severity: low
     enabled: true
     elf_heuristic: true
 
   - id: persistence-autostart
     name: Autostart persistence hint
-    description: Writing or referencing desktop autostart from odd process
-    severity: medium
+    description: Autostart entry runs something from a user writable or hidden folder or uses download or shell tricks
+    severity: low
     enabled: true
+    kill: false
+    autostart_heuristic: true
     cmdline_patterns:
-      - '.config/autostart'
       - /etc/cron
-    path_patterns:
-      - '.config/autostart/.*\.desktop$'

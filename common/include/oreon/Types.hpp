@@ -40,7 +40,8 @@ enum class ThreatAction {
   Allowed,
   Restored,
   Deleted,
-  Blocked
+  Blocked,
+  Killed
 };
 
 struct Threat {
@@ -54,6 +55,12 @@ struct Threat {
   int64_t timestamp{0};
   ThreatAction action{ThreatAction::Detected};
   std::string quarantineId;
+  std::string engine;
+  std::string kind{"file"};
+  int pid{0};
+  std::string remoteAddr;
+  std::string originUrl;
+  bool heuristic{false};
 };
 
 struct ScanProgress {
@@ -82,10 +89,14 @@ struct ProcessEvent {
   int ppid{0};
   std::string name;
   std::string cmdline;
+  std::vector<std::string> argv;
   std::string exe;
   int64_t timestamp{0};
   bool suspicious{false};
   std::string reason;
+  std::string ruleId;
+  bool kill{false};
+  Severity severity{Severity::High};
 };
 
 struct FileEvent {
@@ -123,6 +134,9 @@ struct QuarantineItem {
   int64_t quarantinedAt{0};
   std::string metaPath;
   std::string dataPath;
+  int ownerUid{-1};
+  std::string originUrl;
+  int originalMode{0600};
 };
 
 struct DaemonConfig {
@@ -141,6 +155,36 @@ struct DaemonConfig {
   int scheduleHour{-1};
   int scheduleMinute{0};
   std::string scheduleType{"none"};
+
+  bool clamavEnabled{true};
+  std::string clamavDbDir{"/var/lib/clamav"};
+  int clamavMaxFileMb{100};
+
+  bool onAccessBlocking{true};
+  bool onAccessScanOpen{true};
+  std::vector<std::string> onAccessPaths;
+  int onAccessTimeoutMs{3000};
+  int onAccessMaxFileMb{32};
+
+  bool killMalicious{true};
+
+  bool networkBlocking{true};
+
+  bool rulesAutoUpdate{true};
+  std::string rulesUrl{"https://od-rules.oreonhq.com"};
+  int rulesUpdateHours{6};
+  std::string rulesPublicKey;
+
+  int fileScanMaxFileMb{200};
+
+  bool ransomShield{true};
+  bool execProtection{true};
+  bool persistenceGuard{true};
+  bool revShellWatch{true};
+  bool privEscWatch{true};
+  std::vector<std::string> execAllowList;
+
+  std::vector<std::string> adminGroups{"wheel"};
 };
 
 inline int64_t nowEpoch() {

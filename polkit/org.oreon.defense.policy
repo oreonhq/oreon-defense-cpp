@@ -7,7 +7,7 @@
   <vendor_url>https://oreonhq.com</vendor_url>
   <action id="org.oreon.defense.manage">
     <description>Manage Oreon Defense</description>
-    <message>Authentication is required to change Oreon Defense system settings</message>
+    <message>Authentication is required to change Oreon Defense settings, restore or delete quarantined files, or unblock addresses</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>
@@ -17,6 +17,24 @@
   <action id="org.oreon.defense.quarantine">
     <description>Quarantine or restore files with Oreon Defense</description>
     <message>Authentication is required to quarantine or restore files</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+  <action id="org.oreon.defense.delete">
+    <description>Delete a quarantined file with Oreon Defense</description>
+    <message>Deleting a file that is already in quarantine is always allowed</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>yes</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+  </action>
+  <action id="org.oreon.defense.network">
+    <description>Block network addresses with Oreon Defense</description>
+    <message>Authentication is required to block a network address</message>
     <defaults>
       <allow_any>auth_admin</allow_any>
       <allow_inactive>auth_admin</allow_inactive>

@@ -17,7 +17,13 @@ inline json threatToJson(const Threat& t) {
     {"sha256", t.sha256},
     {"timestamp", t.timestamp},
     {"action", static_cast<int>(t.action)},
-    {"quarantineId", t.quarantineId}
+    {"quarantineId", t.quarantineId},
+    {"engine", t.engine},
+    {"kind", t.kind},
+    {"pid", t.pid},
+    {"remoteAddr", t.remoteAddr},
+    {"originUrl", t.originUrl},
+    {"heuristic", t.heuristic}
   };
 }
 
@@ -33,6 +39,12 @@ inline Threat threatFromJson(const json& j) {
   t.timestamp = j.value("timestamp", int64_t{0});
   t.action = static_cast<ThreatAction>(j.value("action", 0));
   t.quarantineId = j.value("quarantineId", "");
+  t.engine = j.value("engine", "");
+  t.kind = j.value("kind", "file");
+  t.pid = j.value("pid", 0);
+  t.remoteAddr = j.value("remoteAddr", "");
+  t.originUrl = j.value("originUrl", "");
+  t.heuristic = j.value("heuristic", false);
   return t;
 }
 
@@ -69,7 +81,10 @@ inline json quarantineToJson(const QuarantineItem& q) {
     {"severity", severityToString(q.severity)},
     {"quarantinedAt", q.quarantinedAt},
     {"metaPath", q.metaPath},
-    {"dataPath", q.dataPath}
+    {"dataPath", q.dataPath},
+    {"ownerUid", q.ownerUid},
+    {"originUrl", q.originUrl},
+    {"originalMode", q.originalMode}
   };
 }
 
