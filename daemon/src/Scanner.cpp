@@ -3,6 +3,7 @@
 #include "Quarantine.hpp"
 #include "EventLog.hpp"
 #include <oreon/Hash.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 
@@ -87,31 +88,55 @@ void Scanner::run(std::string type, std::vector<std::string> roots) {
       if (progressCb_ && (prog_.filesScanned % 25 == 0)) progressCb_(prog_);
     }
 
-    if (!engine_) return;
+    if (!engine_ && !detect_) return;
     // skip huge files
     std::error_code ec;
     auto sz = fs::file_size(p, ec);
-    if (ec || sz > 50ull * 1024 * 1024) return;
+    if (ec || sz > 100ull * 1024 * 1024) return;
 
-    auto m = engine_->matchFile(path);
-    if (!m.matched) return;
+    Detection d;
+    if (detect_) {
+      d = detect_(path);
+    } else {
+      auto m = engine_->matchFile(path);
+      if (m.matched) {
+        d.matched = true;
+        d.name = m.rule.name;
+        d.ruleId = m.rule.id;
+        d.detail = m.detail;
+        d.description = m.rule.description;
+        d.severity = m.rule.severity;
+        d.engine = "rules";
+        if (m.heuristic) {
+          d.heuristic = true;
+          d.severity = std::min(d.severity, Severity::Low);
+          d.kill = false;
+        }
+      }
+    }
+    if (!d.matched) return;
 
     Threat t;
     t.id = "thr-" + std::to_string(nowEpoch()) + "-" + std::to_string(prog_.filesScanned);
-    t.name = m.rule.name;
+    t.name = d.name;
     t.path = path;
-    t.ruleId = m.rule.id;
-    t.description = m.rule.description + " [" + m.detail + "]";
-    t.severity = m.rule.severity;
+    t.ruleId = d.ruleId;
+    t.description = d.description + " [" + d.detail + "]";
+    t.severity = d.severity;
+    t.heuristic = d.heuristic;
+    t.engine = d.engine;
     t.sha256 = sha256File(path);
     t.timestamp = nowEpoch();
     t.action = ThreatAction::Detected;
 
-    if (autoQuarantine_ && quarantine_) {
-      auto q = quarantine_->quarantineFile(path, t);
+    if (autoQuarantine_ && quarantine_ && t.severity >= Severity::High) {
+      std::string qerr;
+      auto q = quarantine_->quarantineFile(path, t, &qerr);
       if (q) {
         t.action = ThreatAction::Quarantined;
         t.quarantineId = q->id;
+      } else if (log_) {
+        log_->warn("scan", "quarantine failed: " + qerr, path);
       }
     }
 

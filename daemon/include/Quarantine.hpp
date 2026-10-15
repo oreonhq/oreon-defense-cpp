@@ -10,7 +10,8 @@ namespace oreon {
 class Quarantine {
 public:
   void setDir(const std::string& dir);
-  std::optional<QuarantineItem> quarantineFile(const std::string& path, const Threat& threat);
+  std::optional<QuarantineItem> quarantineFile(const std::string& path, const Threat& threat,
+                                               std::string* err = nullptr);
   bool restore(const std::string& id, std::string* err = nullptr);
   bool remove(const std::string& id, std::string* err = nullptr);
   std::vector<QuarantineItem> list() const;
@@ -21,7 +22,9 @@ private:
   mutable std::mutex mu_;
   std::string dir_;
   std::vector<QuarantineItem> items_;
-  void saveMeta(const QuarantineItem& item) const;
+  bool saveMeta(const QuarantineItem& item) const;
+public:
+  static bool moveFile(const std::string& from, const std::string& to, int mode, std::string* err);
 };
 
 } // namespace oreon

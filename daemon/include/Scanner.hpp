@@ -1,5 +1,6 @@
 #pragma once
 #include <oreon/Types.hpp>
+#include "Detection.hpp"
 #include <functional>
 #include <thread>
 #include <atomic>
@@ -17,6 +18,7 @@ class Scanner {
 public:
   using ProgressCb = std::function<void(const ScanProgress&)>;
   using ThreatCb = std::function<void(const Threat&)>;
+  using DetectFn = std::function<Detection(const std::string& path)>;
 
   Scanner() = default;
   ~Scanner() {
@@ -25,6 +27,7 @@ public:
   }
 
   void setRuleEngine(RuleEngine* e) { engine_ = e; }
+  void setDetector(DetectFn f) { detect_ = std::move(f); }
   void setQuarantine(Quarantine* q) { quarantine_ = q; }
   void setEventLog(EventLog* l) { log_ = l; }
   void setExclusions(const std::vector<std::string>& e) { exclusions_ = e; }
@@ -43,6 +46,7 @@ private:
   uint64_t countFiles(const std::vector<std::string>& roots) const;
 
   RuleEngine* engine_{nullptr};
+  DetectFn detect_;
   Quarantine* quarantine_{nullptr};
   EventLog* log_{nullptr};
   std::vector<std::string> exclusions_;

@@ -1,5 +1,5 @@
 Name:           oreon-defense
-Version:        1.0.3
+Version:        1.0.15
 Release:        1%{?dist}
 Summary:        Oreon security system with real-time protection
 License:        GPL-3.0-or-later
@@ -13,12 +13,19 @@ BuildRequires:  qt6-qtbase-devel
 BuildRequires:  openssl-devel
 BuildRequires:  yaml-cpp-devel
 BuildRequires:  json-devel
+BuildRequires:  clamav-devel
+BuildRequires:  libcurl-devel
 BuildRequires:  systemd-rpm-macros
 
 Requires:       qt6-qtbase
 Requires:       qt6-qtbase-gui
 Requires:       openssl-libs
 Requires:       yaml-cpp
+Requires:       clamav-lib
+Requires:       (clamav-update or clamav-data)
+Requires:       libcurl
+Requires:       nftables
+Requires:       polkit
 Requires:       systemd
 Requires(post): systemd
 Requires(preun): systemd
@@ -38,6 +45,8 @@ Straightforward protection and visibility with real-time alerts.
 %cmake_install
 install -D -m 0755 scripts/trigger-scan.sh %{buildroot}%{_libexecdir}/oreon-defense/trigger-scan.sh
 install -D -m 0755 scripts/test_installed_detection.sh %{buildroot}%{_libexecdir}/oreon-defense/test_installed_detection.sh
+install -D -m 0755 scripts/verify_detection.sh %{buildroot}%{_libexecdir}/oreon-defense/verify_detection.sh
+install -D -m 0644 data/keys/od-rules-ed25519.pub %{buildroot}%{_datadir}/oreon-defense/keys/od-rules-ed25519.pub
 install -D -m 0644 config/config.json.example %{buildroot}%{_sysconfdir}/oreon-defense/config.json
 mkdir -p %{buildroot}%{_sysconfdir}/xdg/autostart
 cat > %{buildroot}%{_sysconfdir}/xdg/autostart/oreon-defense-autostart.desktop <<'EOF'
@@ -60,6 +69,9 @@ mkdir -p %{buildroot}%{_localstatedir}/lib/oreon-defense/quarantine
 %systemd_post oreon-defense-scan.timer
 if [ -x /usr/bin/systemctl ]; then
   systemctl daemon-reload >/dev/null 2>&1 || :
+  if systemctl cat clamav-freshclam.service >/dev/null 2>&1; then
+    systemctl enable --now clamav-freshclam.service >/dev/null 2>&1 || :
+  fi
   systemctl enable --now oreon-defense.service >/dev/null 2>&1 || :
   systemctl enable --now oreon-defense-scan.timer >/dev/null 2>&1 || :
 fi
@@ -86,6 +98,7 @@ fi
 %{_bindir}/oreon-defense-daemon
 %{_libexecdir}/oreon-defense/trigger-scan.sh
 %{_libexecdir}/oreon-defense/test_installed_detection.sh
+%{_libexecdir}/oreon-defense/verify_detection.sh
 %{_datadir}/applications/oreon-defense.desktop
 %{_sysconfdir}/xdg/autostart/oreon-defense-autostart.desktop
 %{_datadir}/oreon-defense/
@@ -96,8 +109,8 @@ fi
 %{_unitdir}/oreon-defense-scan.service
 %{_unitdir}/oreon-defense-scan.timer
 %config(noreplace) %{_sysconfdir}/oreon-defense/config.json
-%dir %{_localstatedir}/lib/oreon-defense
-%dir %{_localstatedir}/lib/oreon-defense/quarantine
+%dir %attr(0700,root,root) %{_localstatedir}/lib/oreon-defense
+%dir %attr(0700,root,root) %{_localstatedir}/lib/oreon-defense/quarantine
 
 %changelog
 %autochangelog

@@ -46,6 +46,21 @@ inline std::string defaultRulesPath() {
   return defaultDataDir() + "/rules/starter-rules.yaml";
 }
 
+inline std::string defaultFeedDir() {
+  return defaultDataDir() + "/rules/feed";
+}
+
+inline std::string defaultPublicKeyPath() {
+  const char* candidates[] = {
+    "/usr/share/oreon-defense/keys/od-rules-ed25519.pub",
+    "data/keys/od-rules-ed25519.pub",
+    "../data/keys/od-rules-ed25519.pub",
+  };
+  for (auto c : candidates)
+    if (fs::exists(c)) return c;
+  return candidates[0];
+}
+
 inline std::string defaultLogPath() {
   return defaultDataDir() + "/events.jsonl";
 }

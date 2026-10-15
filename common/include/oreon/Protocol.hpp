@@ -23,6 +23,13 @@ namespace proto {
   constexpr const char* MethodSetConfig = "setConfig";
   constexpr const char* MethodUpdateRules = "updateRules";
   constexpr const char* MethodPing = "ping";
+  constexpr const char* MethodGetEngineStatus = "getEngineStatus";
+  constexpr const char* MethodSetOptions = "setOptions";
+  constexpr const char* MethodGetBlocklist = "getBlocklist";
+  constexpr const char* MethodBlockIp = "blockIp";
+  constexpr const char* MethodUnblockIp = "unblockIp";
+  constexpr const char* MethodKillProcess = "killProcess";
+  constexpr const char* MethodWhoAmI = "whoami";
 
   constexpr const char* EventThreat = "threat";
   constexpr const char* EventScanProgress = "scanProgress";
@@ -31,5 +38,8 @@ namespace proto {
   constexpr const char* EventLog = "log";
   constexpr const char* EventProcess = "process";
   constexpr const char* EventNetwork = "network";
+  constexpr const char* EventEngine = "engine";
+  constexpr const char* EventRulesUpdate = "rulesUpdate";
+  constexpr const char* EventBlocklist = "blocklist";
 }
 }

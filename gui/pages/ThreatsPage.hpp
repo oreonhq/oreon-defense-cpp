@@ -3,17 +3,17 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QHeaderView>
-#include <QStackedWidget>
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
-#include <QFrame>
 #include <QMessageBox>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDateTime>
 #include <QLocale>
+#include <QInputDialog>
+#include <QLineEdit>
 #include "DaemonClient.hpp"
 #include "Theme.hpp"
 
@@ -25,13 +25,16 @@ public:
     auto* root = new QVBoxLayout(this);
 
     tabs_ = new QTabWidget;
-    tabs_->setDocumentMode(false);
-    tabs_->addTab(buildDetectedTab(), Theme::icon({"dialog-warning"}), tr("Detected"));
-    tabs_->addTab(buildQuarantineTab(), Theme::icon({"archive-insert", "folder-locked"}), tr("Quarantine"));
+    tabs_->setDocumentMode(true);
+    tabs_->addTab(buildDetectedTab(), tr("Detected"));
+    tabs_->addTab(buildQuarantineTab(), tr("Quarantine"));
+    tabs_->addTab(buildActivityTab(), tr("Log"));
+    tabs_->addTab(buildBlockTab(), tr("Blocked Addresses"));
     root->addWidget(tabs_, 1);
 
     connect(client_, &DaemonClient::threatsList, this, &ThreatsPage::fillThreats);
     connect(client_, &DaemonClient::quarantineList, this, &ThreatsPage::fillQuarantine);
+    connect(client_, &DaemonClient::blocklistList, this, &ThreatsPage::fillBlocklist);
     connect(client_, &DaemonClient::threatEvent, this, [this](const QJsonObject&) {
       client_->getThreats();
       client_->getQuarantine();
@@ -46,66 +49,67 @@ private:
   static QTreeWidget* makeView(const QStringList& headers) {
     auto* v = new QTreeWidget;
     v->setHeaderLabels(headers);
-    v->setRootIsDecorated(false);
-    v->setUniformRowHeights(true);
-    v->setAlternatingRowColors(true);
-    v->setSelectionBehavior(QAbstractItemView::SelectRows);
-    v->setSelectionMode(QAbstractItemView::SingleSelection);
-    v->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    Theme::setupView(v);
     v->header()->setStretchLastSection(false);
     return v;
   }
 
-  // Empty view, drawn like a list view with a centered message.
-  static QWidget* placeholder(const QString& text) {
-    auto* w = new QFrame;
-    w->setFrameShape(QFrame::StyledPanel);
-    w->setFrameShadow(QFrame::Sunken);
-    w->setBackgroundRole(QPalette::Base);
-    w->setAutoFillBackground(true);
+  QVBoxLayout* tabLayout(QWidget* w) {
     auto* lay = new QVBoxLayout(w);
-    lay->addStretch();
-    auto* l = Theme::secondaryLabel(text);
-    l->setAlignment(Qt::AlignCenter);
-    l->setFont(Theme::titleFont(l->font(), 1.1));
-    lay->addWidget(l);
-    lay->addStretch();
-    return w;
+    lay->setContentsMargins(0, Theme::spacing(this) * 2, 0, 0);
+    lay->setSpacing(Theme::spacing(this));
+    return lay;
   }
 
   QWidget* buildDetectedTab() {
     auto* w = new QWidget;
-    auto* lay = new QVBoxLayout(w);
+    auto* lay = tabLayout(w);
 
-    threatStack_ = new QStackedWidget;
-    threatTable_ = makeView({tr("Severity"), tr("Name"), tr("Path"), tr("Status"), tr("Id")});
+    threatTable_ = makeView({tr("Severity"), tr("Name"), tr("Path"), tr("Status"), tr("Id"), tr("Pid")});
     threatTable_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     threatTable_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     threatTable_->header()->setSectionResizeMode(2, QHeaderView::Stretch);
     threatTable_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     threatTable_->setColumnHidden(4, true);
-    threatStack_->addWidget(placeholder(tr("No active threats")));
-    threatStack_->addWidget(threatTable_);
-    lay->addWidget(threatStack_, 1);
+    threatTable_->setColumnHidden(5, true);
+    new Theme::Placeholder(threatTable_, Theme::icon({"security-high", "emblem-ok"}), tr("No threats"));
+    lay->addWidget(threatTable_, 1);
 
     auto* row = new QHBoxLayout;
     auto* quar = new QPushButton(Theme::icon({"archive-insert", "edit-move"}), tr("Quarantine"));
     auto* allow = new QPushButton(Theme::icon({"dialog-ok-apply", "dialog-ok"}), tr("Allow"));
+    auto* kill = new QPushButton(Theme::icon({"process-stop", "application-exit"}), tr("Kill Process"));
     auto* refresh = new QPushButton(Theme::icon({"view-refresh"}), tr("Refresh"));
     quar->setToolTip(tr("Move the selected file to quarantine"));
     allow->setToolTip(tr("Trust the selected file and stop flagging it"));
+    kill->setToolTip(tr("Stop the selected process"));
     quar->setEnabled(false);
     allow->setEnabled(false);
+    kill->setEnabled(false);
     row->addWidget(quar);
     row->addWidget(allow);
+    row->addWidget(kill);
     row->addStretch();
     row->addWidget(refresh);
     lay->addLayout(row);
 
-    connect(threatTable_, &QTreeWidget::itemSelectionChanged, this, [this, quar, allow] {
-      const bool sel = threatTable_->currentItem() && threatTable_->currentItem()->isSelected();
-      quar->setEnabled(sel);
+    connect(threatTable_, &QTreeWidget::itemSelectionChanged, this, [this, quar, allow, kill] {
+      auto* it = threatTable_->currentItem();
+      const bool sel = it && it->isSelected();
+      const bool proc = sel && it->text(5).toInt() > 1;
+      quar->setEnabled(sel && !proc);
       allow->setEnabled(sel);
+      kill->setEnabled(proc);
+    });
+    connect(kill, &QPushButton::clicked, this, [this] {
+      auto* it = threatTable_->currentItem();
+      if (!it) return;
+      const int pid = it->text(5).toInt();
+      if (pid <= 1) return;
+      if (QMessageBox::question(this, tr("Kill Process"),
+            tr("Stop process %1 (%2)?").arg(pid).arg(it->text(1))) != QMessageBox::Yes)
+        return;
+      client_->killProcess(pid);
     });
     connect(refresh, &QPushButton::clicked, client_, &DaemonClient::getThreats);
     connect(allow, &QPushButton::clicked, this, [this] {
@@ -123,17 +127,15 @@ private:
 
   QWidget* buildQuarantineTab() {
     auto* w = new QWidget;
-    auto* lay = new QVBoxLayout(w);
+    auto* lay = tabLayout(w);
 
-    quarStack_ = new QStackedWidget;
-    quarTable_ = makeView({tr("Threat"), tr("Original Location"), tr("Quarantined"), tr("Id")});
+    quarTable_ = makeView({tr("Threat"), tr("Original Location"), tr("Date"), tr("Id")});
     quarTable_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
     quarTable_->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     quarTable_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     quarTable_->setColumnHidden(3, true);
-    quarStack_->addWidget(placeholder(tr("Quarantine is empty")));
-    quarStack_->addWidget(quarTable_);
-    lay->addWidget(quarStack_, 1);
+    new Theme::Placeholder(quarTable_, Theme::icon({"security-high", "emblem-ok"}), tr("Quarantine is empty"));
+    lay->addWidget(quarTable_, 1);
 
     auto* row = new QHBoxLayout;
     auto* restore = new QPushButton(Theme::icon({"document-revert", "edit-undo"}), tr("Restore"));
@@ -179,13 +181,126 @@ private:
       case 3: return QObject::tr("Restored");
       case 4: return QObject::tr("Deleted");
       case 5: return QObject::tr("Blocked");
+      case 6: return QObject::tr("Process stopped");
       default: return QObject::tr("Detected");
     }
   }
 
+  static QString engineLabel(const QString& e) {
+    if (e == QLatin1String("clamav")) return QObject::tr("ClamAV");
+    if (e == QLatin1String("rules")) return QObject::tr("Rules");
+    if (e == QLatin1String("process")) return QObject::tr("Process");
+    return e.isEmpty() ? QObject::tr("Rules") : Theme::capitalized(e);
+  }
+
+  QWidget* buildActivityTab() {
+    auto* w = new QWidget;
+    auto* lay = tabLayout(w);
+    actTable_ = makeView({tr("Time"), tr("Severity"), tr("Name"), tr("Path"), tr("Engine"), tr("Action")});
+    actTable_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    connect(actTable_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem* it, int) {
+      if (!it) return;
+      const QString details = it->data(0, Qt::UserRole).toString();
+      if (details.isEmpty()) return;
+      QMessageBox box(this);
+      box.setIcon(QMessageBox::Information);
+      box.setWindowTitle(tr("Details"));
+      box.setText(it->text(2));
+      box.setInformativeText(it->text(3));
+      box.setDetailedText(details);
+      box.setStandardButtons(QMessageBox::Close);
+      box.exec();
+    });
+    actTable_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    actTable_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    actTable_->header()->setSectionResizeMode(3, QHeaderView::Stretch);
+    actTable_->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    actTable_->header()->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+    actTable_->setSelectionMode(QAbstractItemView::NoSelection);
+    new Theme::Placeholder(actTable_, Theme::icon({"view-history", "document-open-recent"}), tr("Nothing found yet"));
+    lay->addWidget(actTable_, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* refresh = new QPushButton(Theme::icon({"view-refresh"}), tr("Refresh"));
+    row->addStretch();
+    row->addWidget(refresh);
+    lay->addLayout(row);
+    connect(refresh, &QPushButton::clicked, client_, &DaemonClient::getThreats);
+    return w;
+  }
+
+  QWidget* buildBlockTab() {
+    auto* w = new QWidget;
+    auto* lay = tabLayout(w);
+    blockState_ = new QLabel(tr("Network blocking is not active right now."));
+    blockState_->setWordWrap(true);
+    blockState_->hide();
+    lay->addWidget(blockState_);
+    blockTable_ = makeView({tr("Address"), tr("Source"), tr("Reason")});
+    blockTable_->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    blockTable_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    blockTable_->header()->setSectionResizeMode(2, QHeaderView::Stretch);
+    new Theme::Placeholder(blockTable_, Theme::icon({"network-disconnect", "network-wired"}), tr("No blocked addresses"));
+    lay->addWidget(blockTable_, 1);
+
+    auto* row = new QHBoxLayout;
+    auto* add = new QPushButton(Theme::icon({"list-add"}), tr("Block Address..."));
+    auto* remove = new QPushButton(Theme::icon({"list-remove"}), tr("Unblock"));
+    auto* refresh = new QPushButton(Theme::icon({"view-refresh"}), tr("Refresh"));
+    remove->setEnabled(false);
+    row->addWidget(add);
+    row->addWidget(remove);
+    row->addStretch();
+    row->addWidget(refresh);
+    lay->addLayout(row);
+
+    connect(blockTable_, &QTreeWidget::itemSelectionChanged, this, [this, remove] {
+      remove->setEnabled(blockTable_->currentItem() && blockTable_->currentItem()->isSelected());
+    });
+    connect(refresh, &QPushButton::clicked, client_, &DaemonClient::getBlocklist);
+    connect(add, &QPushButton::clicked, this, [this] {
+      bool ok = false;
+      const QString ip = QInputDialog::getText(this, tr("Block Address"),
+        tr("IP address or range, for example 203.0.113.7 or 198.51.100.0/24:"),
+        QLineEdit::Normal, QString(), &ok).trimmed();
+      if (ok && !ip.isEmpty()) client_->blockIp(ip, tr("Blocked by user"));
+    });
+    connect(remove, &QPushButton::clicked, this, [this] {
+      auto* it = blockTable_->currentItem();
+      if (it) client_->unblockIp(it->text(0));
+    });
+    return w;
+  }
+
+  void fillBlocklist(const QJsonArray& arr, bool active) {
+    blockTable_->clear();
+    for (const auto& v : arr) {
+      const QJsonObject o = v.toObject();
+      const QString src = o.value("source").toString();
+      auto* item = new QTreeWidgetItem({o.value("cidr").toString(),
+                                        src == QLatin1String("feed") ? tr("Rule feed") : tr("You"),
+                                        o.value("reason").toString()});
+      blockTable_->addTopLevelItem(item);
+    }
+    blockState_->setVisible(!active);
+  }
+
   void fillThreats(const QJsonArray& arr) {
     threatTable_->clear();
-    int shown = 0;
+    actTable_->clear();
+    for (int i = arr.size() - 1; i >= 0; --i) {
+      const QJsonObject o = arr.at(i).toObject();
+      const QString sev = o.value("severity").toString();
+      const qint64 ts = o.value("timestamp").toVariant().toLongLong();
+      auto* item = new QTreeWidgetItem({
+        Theme::when(ts),
+        Theme::capitalized(sev), o.value("name").toString(), o.value("path").toString(),
+        engineLabel(o.value("engine").toString()), actionLabel(o.value("action").toInt(0))});
+      item->setIcon(1, Theme::severityIcon(sev));
+      item->setToolTip(3, o.value("description").toString());
+      item->setData(0, Qt::UserRole, o.value("description").toString());
+      actTable_->addTopLevelItem(item);
+    }
     for (const auto& v : arr) {
       const QJsonObject o = v.toObject();
       const int action = o.value("action").toInt(0);
@@ -196,13 +311,13 @@ private:
                                         o.value("name").toString(),
                                         o.value("path").toString(),
                                         actionLabel(action),
-                                        o.value("id").toString()});
+                                        o.value("id").toString(),
+                                        QString::number(o.value("kind").toString() == QLatin1String("process")
+                                                          ? o.value("pid").toInt() : 0)});
       item->setIcon(0, Theme::severityIcon(sev));
       item->setToolTip(2, o.value("path").toString());
       threatTable_->addTopLevelItem(item);
-      ++shown;
     }
-    threatStack_->setCurrentIndex(shown > 0 ? 1 : 0);
   }
 
   void fillQuarantine(const QJsonArray& arr) {
@@ -212,18 +327,18 @@ private:
       const qint64 ts = o.value("quarantinedAt").toVariant().toLongLong();
       auto* item = new QTreeWidgetItem({o.value("threatName").toString(),
                                         o.value("originalPath").toString(),
-                                        QLocale().toString(QDateTime::fromSecsSinceEpoch(ts), QLocale::ShortFormat),
+                                        Theme::when(ts),
                                         o.value("id").toString()});
       item->setToolTip(1, o.value("originalPath").toString());
       quarTable_->addTopLevelItem(item);
     }
-    quarStack_->setCurrentIndex(arr.isEmpty() ? 0 : 1);
   }
 
   DaemonClient* client_;
   QTabWidget* tabs_;
-  QStackedWidget* threatStack_;
-  QStackedWidget* quarStack_;
   QTreeWidget* threatTable_;
   QTreeWidget* quarTable_;
+  QTreeWidget* actTable_{nullptr};
+  QTreeWidget* blockTable_{nullptr};
+  QLabel* blockState_{nullptr};
 };

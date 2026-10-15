@@ -16,5 +16,32 @@
   "networkWatch": true,
   "scheduleType": "daily",
   "scheduleHour": 3,
-  "scheduleMinute": 0
+  "scheduleMinute": 0,
+
+  "clamavEnabled": true,
+  "clamavDbDir": "/var/lib/clamav",
+
+  "onAccessBlocking": true,
+  "onAccessScanOpen": true,
+  "onAccessPaths": [
+    "/home",
+    "/root",
+    "/tmp",
+    "/var/tmp",
+    "/dev/shm"
+  ],
+  "onAccessTimeoutMs": 3000,
+  "onAccessMaxFileMb": 32,
+
+  "killMalicious": true,
+  "networkBlocking": true,
+
+  "rulesAutoUpdate": true,
+  "rulesUrl": "https://od-rules.oreonhq.com",
+  "rulesUpdateHours": 6,
+  "rulesPublicKey": "/usr/share/oreon-defense/keys/od-rules-ed25519.pub",
+
+  "adminGroups": [
+    "wheel"
+  ]
 }

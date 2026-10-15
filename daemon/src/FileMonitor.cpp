@@ -40,7 +40,7 @@ void FileMonitor::addWatchRecursive(const std::string& path, int depth) {
   if (!fs::exists(path) || !fs::is_directory(path)) return;
   if (isExcluded(path)) return;
 
-  uint32_t mask = IN_CREATE | IN_MODIFY | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE;
+  uint32_t mask = IN_CREATE | IN_MODIFY | IN_MOVED_TO | IN_CLOSE_WRITE | IN_DELETE | IN_ATTRIB;
   int wd = inotify_add_watch(fd_, path.c_str(), mask);
   if (wd >= 0) wdToPath_[wd] = path;
 
@@ -103,7 +103,7 @@ void FileMonitor::loop() {
           fe.path = full;
           fe.timestamp = nowEpoch();
           if (ev->mask & (IN_CREATE | IN_MOVED_TO)) fe.op = "create";
-          else if (ev->mask & IN_MODIFY || ev->mask & IN_CLOSE_WRITE) fe.op = "modify";
+          else if (ev->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_ATTRIB)) fe.op = "modify";
           else if (ev->mask & IN_DELETE) fe.op = "delete";
           else fe.op = "other";
 
