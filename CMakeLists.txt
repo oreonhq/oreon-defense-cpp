@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(oreon-defense VERSION 1.0.15 LANGUAGES CXX)
+project(oreon-defense VERSION 1.0.16 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -92,6 +92,7 @@ set(GUI_SOURCES
   gui/pages/ThreatsPage.hpp
   gui/pages/HistoryPage.hpp
   gui/pages/SettingsPage.hpp
+  gui/icons/icons.qrc
 )
 
 add_executable(oreon-defense ${GUI_SOURCES})

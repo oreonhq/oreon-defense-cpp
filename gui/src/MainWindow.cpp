@@ -26,7 +26,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setupUi();
   setupTray();
   setWindowTitle(tr("Oreon Defense"));
-  setWindowIcon(QIcon::fromTheme("oreon-defense", Theme::icon({"security-high"})));
+  setWindowIcon(QIcon::fromTheme("oreon-defense", QIcon(QStringLiteral(":/icons/oreon-defense.svg"))));
   resize(1000, 680);
   // offline until first successful connect
   emit client_->connectedChanged(false);
@@ -190,7 +190,7 @@ void MainWindow::raiseAlert(const QString& title, const QString& body, const QSt
   if (tray_) tray_->setLastAlert(title, actions, ctx);
   if (!notifications_) return;
   if (notifier_->available()) {
-    notifier_->show(title, body, icon, actions, ctx, urgency, timeoutMs);
+    notifier_->show(title, body, Theme::iconName({icon}, QStringLiteral("oreon-defense")), actions, ctx, urgency, timeoutMs);
   } else if (tray_) {
     const auto kind = urgency == Notifier::Urgency::Low ? QSystemTrayIcon::Information
                                                         : QSystemTrayIcon::Warning;

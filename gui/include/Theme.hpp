@@ -21,30 +21,106 @@
 #include <QFormLayout>
 #include <QDateTime>
 #include <QLocale>
+#include <QFile>
+#include <QHash>
+#include <QFileInfo>
+#include <QStandardPaths>
 
 namespace Theme {
 
-// Under Plasma the platform theme already picks Breeze and the user's
-// palette and icon theme. Elsewhere, fall back to Breeze (if installed)
-// or Fusion, and make sure freedesktop icon names still resolve.
+inline bool isKde() {
+  return qEnvironmentVariable("XDG_CURRENT_DESKTOP").contains(QLatin1String("KDE"), Qt::CaseInsensitive);
+}
+
+inline void addXdgIconPaths() {
+  QStringList paths = QIcon::themeSearchPaths();
+  QStringList dirs = QStandardPaths::locateAll(QStandardPaths::GenericDataLocation,
+                                               QStringLiteral("icons"), QStandardPaths::LocateDirectory);
+  dirs << QStringLiteral("/usr/share/icons");
+  for (const QString& d : dirs)
+    if (!paths.contains(d) && QFileInfo(d).isDir()) paths << d;
+  QIcon::setThemeSearchPaths(paths);
+}
+
+inline bool themeInstalled(const QString& name) {
+  for (const QString& dir : QIcon::themeSearchPaths())
+    if (QFile::exists(dir + QLatin1Char('/') + name + QLatin1String("/index.theme"))) return true;
+  return false;
+}
+
+// Under Plasma the platform theme already picks Breeze and the user's icon theme.
 inline void applyStyle(QApplication& app) {
   const QString current = app.style() ? app.style()->name() : QString();
   if (current.compare(QLatin1String("breeze"), Qt::CaseInsensitive) != 0 &&
       QStyleFactory::keys().contains(QLatin1String("Breeze"), Qt::CaseInsensitive))
     app.setStyle(QStringLiteral("Breeze"));
-  // Without Breeze, keep whatever the platform picked (Fusion by default).
-  if (QIcon::themeName().isEmpty() || QIcon::themeName() == QLatin1String("hicolor"))
-    QIcon::setThemeName(QStringLiteral("breeze"));
-  QIcon::setFallbackThemeName(QStringLiteral("breeze"));
+  addXdgIconPaths();
+  const QString kdeTheme = QStringLiteral("breeze");
+  const QString gnomeTheme = QStringLiteral("Adwaita");
+  const QString preferred = isKde() ? kdeTheme : gnomeTheme;
+  const QString other = isKde() ? gnomeTheme : kdeTheme;
+  if (QIcon::themeName().isEmpty() || QIcon::themeName() == QLatin1String("hicolor")) {
+    if (themeInstalled(preferred)) QIcon::setThemeName(preferred);
+    else if (themeInstalled(other)) QIcon::setThemeName(other);
+  }
+  if (QIcon::fallbackThemeName().isEmpty() || QIcon::fallbackThemeName() == QLatin1String("hicolor")) {
+    const QString fb = QIcon::themeName() == preferred ? other : preferred;
+    QIcon::setFallbackThemeName(themeInstalled(fb) ? fb : QStringLiteral("hicolor"));
+  }
+  QStringList paths = QIcon::fallbackSearchPaths();
+  paths << QStringLiteral(":/icons");
+  QIcon::setFallbackSearchPaths(paths);
 }
 
-// QIcon::fromTheme with a chain of freedesktop fallbacks.
-inline QIcon icon(const QStringList& names) {
+inline QString bundledName(const QString& n) {
+  static const QHash<QString, QString> alias = {
+    {"search", "system-search"}, {"edit-find", "system-search"},
+    {"update-none", "download"}, {"system-software-update", "download"},
+    {"document-open-folder", "folder-open"}, {"open-folder", "folder-open"},
+    {"dialog-cancel", "process-stop"}, {"network-disconnect", "process-stop"},
+    {"document-revert", "edit-undo"}, {"edit-move", "archive-insert"},
+    {"dialog-ok-apply", "emblem-ok"}, {"dialog-ok", "emblem-ok"},
+    {"view-history", "document-open-recent"}, {"configure", "preferences-system"},
+    {"network-connect", "network-wired"}, {"network-workgroup", "network-wired"},
+    {"network-error", "network-wired"}, {"user-home", "go-home"},
+    {"application-x-executable", "system-run"}, {"view-calendar", "appointment-new"},
+    {"help-about", "dialog-information"},
+  };
+  QString base = n;
+  if (base.endsWith(QLatin1String("-symbolic"))) base.chop(9);
+  return alias.value(base, base);
+}
+
+inline QIcon bundled(const QString& n) {
+  const QString path = QStringLiteral(":/icons/%1.svg").arg(bundledName(n));
+  return QFile::exists(path) ? QIcon(path) : QIcon();
+}
+
+inline QString resolvedName(const QStringList& names) {
+  QStringList tries;
+  for (const QString& n : names) tries << n << n + QLatin1String("-symbolic");
   for (const QString& n : names) {
-    if (QIcon::hasThemeIcon(n))
-      return QIcon::fromTheme(n);
+    const QString b = bundledName(n);
+    tries << b << b + QLatin1String("-symbolic");
   }
-  return names.isEmpty() ? QIcon() : QIcon::fromTheme(names.first());
+  for (const QString& n : tries)
+    if (QIcon::hasThemeIcon(n)) return n;
+  return QString();
+}
+
+inline QIcon icon(const QStringList& names) {
+  const QString n = resolvedName(names);
+  if (!n.isEmpty()) return QIcon::fromTheme(n);
+  for (const QString& f : names) {
+    const QIcon b = bundled(f);
+    if (!b.isNull()) return b;
+  }
+  return QIcon(QStringLiteral(":/icons/dialog-information.svg"));
+}
+
+inline QString iconName(const QStringList& names, const QString& fallback) {
+  const QString n = resolvedName(names);
+  return n.isEmpty() ? fallback : n;
 }
 
 inline QFont scaledFont(const QFont& base, qreal scale, bool bold = false) {

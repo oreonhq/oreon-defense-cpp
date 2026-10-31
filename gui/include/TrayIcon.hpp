@@ -14,20 +14,20 @@ class TrayIcon : public QSystemTrayIcon {
 public:
   TrayIcon(QWidget* mainWindow, QObject* parent = nullptr)
     : QSystemTrayIcon(parent), main_(mainWindow) {
-    setIcon(QIcon::fromTheme("security-high", QIcon(":/icons/oreon-defense.svg")));
+    setIcon(trayIcon(QStringLiteral("security-high")));
     setToolTip(tr("Oreon Defense"));
 
     auto* menu = new QMenu;
-    showAction_ = menu->addAction(QIcon::fromTheme("window"), tr("Open Oreon Defense"));
-    quickAction_ = menu->addAction(QIcon::fromTheme("system-search"), tr("Scan now"));
-    updateAction_ = menu->addAction(QIcon::fromTheme("view-refresh"), tr("Check for updates"));
+    showAction_ = menu->addAction(Theme::icon({"window", "window-new"}), tr("Open Oreon Defense"));
+    quickAction_ = menu->addAction(Theme::icon({"system-search", "edit-find"}), tr("Scan now"));
+    updateAction_ = menu->addAction(Theme::icon({"view-refresh"}), tr("Check for updates"));
     menu->addSeparator();
     statusAction_ = menu->addAction(tr("Protected"));
     statusAction_->setEnabled(false);
     alertMenu_ = menu->addMenu(Theme::icon({"dialog-warning"}), tr("Latest alert"));
     alertMenu_->setEnabled(false);
     menu->addSeparator();
-    quitAction_ = menu->addAction(QIcon::fromTheme("application-exit"), tr("Quit"));
+    quitAction_ = menu->addAction(Theme::icon({"application-exit"}), tr("Quit"));
     setContextMenu(menu);
 
     connect(showAction_, &QAction::triggered, this, &TrayIcon::showMain);
@@ -84,7 +84,12 @@ private:
       else if (p.disabled || p.emblem == QLatin1String("emblem-important"))
         name = QStringLiteral("security-low");
     }
-    return QIcon::fromTheme(name, QIcon::fromTheme(QStringLiteral("security-high")));
+    return trayIcon(name);
+  }
+
+  static QIcon trayIcon(const QString& name) {
+    if (Theme::isKde() && QIcon::hasThemeIcon(name)) return QIcon::fromTheme(name);
+    return Theme::icon({name});
   }
 
   void showMain() {
