@@ -1,0 +1,34 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file>application-exit.svg</file>
+    <file>appointment-new.svg</file>
+    <file>archive-insert.svg</file>
+    <file>dialog-error.svg</file>
+    <file>dialog-information.svg</file>
+    <file>dialog-password.svg</file>
+    <file>dialog-warning.svg</file>
+    <file>document-open-recent.svg</file>
+    <file>download.svg</file>
+    <file>edit-delete.svg</file>
+    <file>edit-undo.svg</file>
+    <file>emblem-important.svg</file>
+    <file>emblem-ok.svg</file>
+    <file>folder-open.svg</file>
+    <file>go-home.svg</file>
+    <file>list-add.svg</file>
+    <file>list-remove.svg</file>
+    <file>network-wired.svg</file>
+    <file>preferences-desktop-notification.svg</file>
+    <file>preferences-system.svg</file>
+    <file>process-stop.svg</file>
+    <file>security-high.svg</file>
+    <file>security-low.svg</file>
+    <file>security-medium.svg</file>
+    <file>system-run.svg</file>
+    <file>system-search.svg</file>
+    <file>view-filter.svg</file>
+    <file>view-refresh.svg</file>
+    <file>window.svg</file>
+    <file alias="oreon-defense.svg">../../data/icons/hicolor/scalable/apps/oreon-defense.svg</file>
+  </qresource>
+</RCC>
