@@ -159,6 +159,7 @@ struct ProcInfo {
   unsigned long long start{0};
   int linkTrust{-1};
   std::string linkWhy;
+  bool inlineCode{false};
 };
 
 std::string readLinkStr(const std::string& p) {
@@ -244,7 +245,7 @@ bool readProcOnce(int pid, ProcInfo& pi) {
     for (const auto& c : cands) {
       struct stat cs{};
       if (lstat((pi.view + c).c_str(), &cs) == 0 && S_ISREG(cs.st_mode) &&
-          (!pi.exeStat || sameFile(cs, pi.exeSt))) {
+          (!pi.exeStat || sameFile(cs, pi.exeSt) || (pi.exeDeleted && cs.st_dev == pi.exeSt.st_dev))) {
         pi.exe = c;
         pi.innerOk = pi.exeStat;
         break;
@@ -777,7 +778,7 @@ SystemExe classifyInView(const std::string& view, const std::string& root, const
   SystemExe v = SystemExe::RootPath;
   const std::string want = rpmDigest(view, inner);
   if (!want.empty() && lower(sha256File(at)) == want) v = SystemExe::RpmVerified;
-  if (!gRpmFn) {
+  if (!gRpmFn && (v == SystemExe::RpmVerified || !packageTransactionActive())) {
     std::lock_guard<std::mutex> lock(mu);
     if (cache.size() > 4096) cache.clear();
     cache[key] = v;
@@ -872,7 +873,7 @@ SystemExe classifySystemExe(const std::string& path) {
   SystemExe v = SystemExe::RootPath;
   const std::string want = rpmDigest("/", rp);
   if (!want.empty() && lower(sha256File(rp)) == want) v = SystemExe::RpmVerified;
-  if (!gRpmFn) {
+  if (!gRpmFn && (v == SystemExe::RpmVerified || !packageTransactionActive())) {
     std::lock_guard<std::mutex> lock(mu);
     if (cache.size() > 4096) cache.clear();
     cache[key] = v;
@@ -952,6 +953,96 @@ SystemExe judgeFile(const ProcInfo& pi, const std::string& path, std::string* wh
   return classifyInView(pi.view, pi.root, inner, why);
 }
 
+bool scriptDirsOk(const std::string& view, const std::string& inner, bool allowSticky) {
+  for (std::string d = dirName(inner); ; d = dirName(d)) {
+    struct stat ds{};
+    const std::string dp = d == "/" ? (view.empty() ? std::string("/") : view) : view + d;
+    if (stat(dp.c_str(), &ds) != 0 || !S_ISDIR(ds.st_mode)) return false;
+    if (ds.st_uid != 0 && ds.st_uid != gExtraOwner) return false;
+    if ((ds.st_mode & (S_IWGRP | S_IWOTH)) && !(allowSticky && (ds.st_mode & S_ISVTX))) return false;
+    if (d == "/" || d.empty()) break;
+  }
+  return true;
+}
+
+SystemExe classifyScriptAt(const std::string& view, const std::string& inner, std::string* why) {
+  if (inner.empty() || inner[0] != '/' || inner.find("/../") != std::string::npos) {
+    if (why) *why = "bad script path " + inner;
+    return SystemExe::No;
+  }
+  const std::string at = view + inner;
+  struct stat st{};
+  if (lstat(at.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || !rootOwnedStable(st)) {
+    if (why) *why = "script is not a root owned, locked file";
+    return SystemExe::No;
+  }
+  if (!stagingRoot(inner).empty()) {
+    if (!scriptDirsOk(view, inner, true)) { if (why) *why = "staging folder is not root owned"; return SystemExe::No; }
+    if (why) *why = "root only script in a system staging folder";
+    return SystemExe::RootPath;
+  }
+  if (userWritableArea(inner)) { if (why) *why = "script is in a user writable folder"; return SystemExe::No; }
+  if (!scriptDirsOk(view, inner, false)) { if (why) *why = "script folder is not root owned or is writable"; return SystemExe::No; }
+  struct stat rs{};
+  stat(view.empty() ? "/" : view.c_str(), &rs);
+  static std::mutex mu;
+  static std::map<std::string, bool> verified;
+  const std::string key = std::to_string(rs.st_dev) + ":" + std::to_string(rs.st_ino) + "|" + inner + "|" +
+                          std::to_string(st.st_dev) + ":" + std::to_string(st.st_ino) + ":" +
+                          std::to_string(st.st_mtim.tv_sec) + ":" + std::to_string(st.st_size);
+  if (!gRpmFn) {
+    std::lock_guard<std::mutex> lock(mu);
+    if (verified.count(key)) return SystemExe::RpmVerified;
+  }
+  const std::string want = rpmDigest(view.empty() ? std::string("/") : view, inner);
+  if (want.empty()) { if (why) *why = "script is not a packaged file"; return SystemExe::No; }
+  if (lower(sha256File(at)) == want) {
+    if (!gRpmFn) {
+      std::lock_guard<std::mutex> lock(mu);
+      if (verified.size() > 4096) verified.clear();
+      verified[key] = true;
+    }
+    return SystemExe::RpmVerified;
+  }
+  if (packageTransactionActive()) { if (why) *why = "script replaced during a package update"; return SystemExe::RootPath; }
+  if (why) *why = "script differs from its package";
+  return SystemExe::No;
+}
+
+SystemExe judgeScript(const ProcInfo& pi, const std::string& path, std::string* why) {
+  std::string w;
+  SystemExe v = judgeFile(pi, path, &w);
+  if (v != SystemExe::No) return v;
+  if (pi.root == "/") {
+    char real[PATH_MAX];
+    if (!realpath(path.c_str(), real)) { if (why) *why = w; return SystemExe::No; }
+    return classifyScriptAt(std::string(), real, why);
+  }
+  if (!chrootViewOk(pi.view, pi.root, why)) return SystemExe::No;
+  const std::string inner = resolveInRoot(pi.view, path);
+  if (inner.empty()) { if (why) *why = w; return SystemExe::No; }
+  return classifyScriptAt(pi.view, inner, why);
+}
+
+SystemExe replacedProgram(const ProcInfo& pi, std::string& why) {
+  if (!pi.exeStat || !S_ISREG(pi.exeSt.st_mode) || !rootOwnedStable(pi.exeSt) || pi.exe.empty()) {
+    why = "program file was deleted and was not a root owned file";
+    return SystemExe::No;
+  }
+  const bool chrooted = pi.root != "/";
+  std::string w;
+  SystemExe now = SystemExe::No;
+  if (!chrooted) now = classifySystemExe(pi.exe);
+  else if (pi.innerOk) now = classifyInView(pi.view, pi.root, pi.exe, &w);
+  struct stat cs{};
+  const std::string at = chrooted ? pi.view + pi.exe : pi.exe;
+  if (now == SystemExe::No || stat(at.c_str(), &cs) != 0 || cs.st_dev != pi.exeSt.st_dev) {
+    why = "program file was deleted and no system program replaced it: " + pi.hostExe;
+    return SystemExe::No;
+  }
+  return SystemExe::RootPath;
+}
+
 SystemExe judgeModule(const ProcInfo& pi, const std::string& mod, std::string& found) {
   if (mod.empty() || mod.find('/') != std::string::npos || mod.find("..") != std::string::npos) return SystemExe::No;
   std::string rel = mod;
@@ -984,12 +1075,15 @@ SystemExe judgeModule(const ProcInfo& pi, const std::string& mod, std::string& f
   return SystemExe::No;
 }
 
-SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
-  if (pi.exeDeleted) { why = "program file was replaced or deleted"; return SystemExe::No; }
+SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why, bool& inlineCode) {
+  inlineCode = false;
   if (pi.exe.empty()) { why = "no program file"; return SystemExe::No; }
   const bool chrooted = pi.root != "/";
   SystemExe bin;
-  if (chrooted) {
+  if (pi.exeDeleted) {
+    bin = replacedProgram(pi, why);
+    if (bin == SystemExe::No) return bin;
+  } else if (chrooted) {
     if (!pi.innerOk) { why = "program not found inside its chroot " + pi.root + ": " + pi.hostExe; return SystemExe::No; }
     std::string w;
     bin = classifyInView(pi.view, pi.root, pi.exe, &w);
@@ -1001,9 +1095,15 @@ SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
     why = "program is not a locked down system file: " + pi.hostExe;
     return SystemExe::No;
   }
-  const std::string where = chrooted ? pi.root + ":" + pi.exe : pi.exe;
+  const std::string where = (chrooted ? pi.root + ":" + pi.exe : pi.exe) +
+                            (pi.exeDeleted ? " replaced by an update" : "");
   const std::string b = baseName(pi.exe);
   if (!interpreter(b)) { why = std::string("system program ") + where + " (" + systemExeName(bin) + ")"; return bin; }
+  auto runsInline = [&](const char* what) {
+    why = std::string(what) + " " + where + " runs inline code";
+    inlineCode = true;
+    return bin;
+  };
   const bool py = startsWith(b, "python");
   const bool sh = b == "sh" || b == "bash" || b == "dash" || b == "zsh" || b == "ksh";
   for (size_t i = 1; i < pi.argv.size() && i < 6; ++i) {
@@ -1012,14 +1112,14 @@ SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
     if (a == "--") continue;
     if (a[0] == '-' || a[0] == '+') {
       const bool cluster = a.size() >= 2 && a[1] != '-';
-      if (sh && cluster && (a.find('c', 1) != std::string::npos || a.find('s', 1) != std::string::npos ||
-                            a.find('i', 1) != std::string::npos)) {
-        why = "shell runs inline, stdin or interactive code";
+      if (sh && cluster && (a.find('s', 1) != std::string::npos || a.find('i', 1) != std::string::npos)) {
+        why = "shell runs stdin or interactive code";
         return SystemExe::No;
       }
+      if (sh && cluster && a.find('c', 1) != std::string::npos) return runsInline("shell");
       if (sh && (a == "-o" || a == "+o" || a == "-O" || a == "+O")) { ++i; continue; }
-      if (py && cluster && a.find('c', 1) != std::string::npos) { why = "python runs inline code"; return SystemExe::No; }
       if (py && cluster && a.find('i', 1) != std::string::npos) { why = "python runs interactively"; return SystemExe::No; }
+      if (py && cluster && a.find('c', 1) != std::string::npos) return runsInline("python");
       if (py && a == "-m") {
         if (i + 1 >= pi.argv.size()) break;
         std::string file;
@@ -1033,10 +1133,8 @@ SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
         return std::min(bin, m);
       }
       if (py && (a == "-X" || a == "-W")) { ++i; continue; }
-      if (!sh && !py && cluster && (a.find('e', 1) != std::string::npos || a.find('E', 1) != std::string::npos)) {
-        why = "interpreter runs inline code";
-        return SystemExe::No;
-      }
+      if (!sh && !py && cluster && (a.find('e', 1) != std::string::npos || a.find('E', 1) != std::string::npos))
+        return runsInline("interpreter");
       continue;
     }
     std::string target = a;
@@ -1045,7 +1143,7 @@ SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
       target = (pi.cwd == "/" ? std::string() : pi.cwd) + "/" + a;
     }
     std::string w;
-    SystemExe sc = judgeFile(pi, target, &w);
+    SystemExe sc = judgeScript(pi, target, &w);
     if (sc == SystemExe::No) {
       why = "interpreter runs an unverified script: " + target + (w.empty() ? std::string() : " (" + w + ")");
       return SystemExe::No;
@@ -1059,7 +1157,7 @@ SystemExe judgeLinkNow(const ProcInfo& pi, std::string& why) {
 
 SystemExe judgeLink(ProcInfo& pi, std::string& why) {
   if (pi.linkTrust < 0) {
-    pi.linkTrust = static_cast<int>(judgeLinkNow(pi, pi.linkWhy));
+    pi.linkTrust = static_cast<int>(judgeLinkNow(pi, pi.linkWhy, pi.inlineCode));
     if (pi.raced) pi.linkWhy += " (comm and exe did not settle)";
   }
   why = pi.linkWhy;
@@ -1127,7 +1225,11 @@ ActorVerdict assessActor(pid_t pid) {
   v.exePath = self.hostExe;
   v.shellLike = shellLikeName(baseName(self.exe));
   if (self.root != "/") v.chrootRoot = self.root;
-  if (!self.exeDeleted && !self.exe.empty()) {
+  if (self.exeDeleted) {
+    std::string w;
+    v.exe = replacedProgram(self, w);
+    if (self.root != "/") v.exePath = self.root + self.exe;
+  } else if (!self.exe.empty()) {
     if (self.root != "/") {
       v.exe = self.innerOk ? classifyInView(self.view, self.root, self.exe, nullptr) : SystemExe::No;
       if (snap && self.linkTrust >= 0 && !interpreter(baseName(self.exe)))
@@ -1167,6 +1269,10 @@ ActorVerdict assessActor(pid_t pid) {
       return v;
     }
     v.reasons.push_back(tag + why);
+    if (cur.inlineCode && depth == 0) {
+      v.trust = ActorTrust::Untrusted;
+      return v;
+    }
     if (cur.pid == 1) {
       v.reasons.push_back("service lineage from pid 1");
       v.trust = ActorTrust::Trusted;
